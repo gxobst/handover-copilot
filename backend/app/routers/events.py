@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.db.events_repo import EventRepository, get_event_repository
+from app.db.repo import EventRepository, get_event_repository
 from app.schemas.events import SHIFT_KEY_REGEX, EventCreate, EventResponse
 
 router = APIRouter(prefix="/api", tags=["events"])

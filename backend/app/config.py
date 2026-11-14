@@ -23,6 +23,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_VERSION", "app_version", "version"),
         description="Application version",
     )
+    database_url: str = Field(
+        default="sqlite:///./handover.db",
+        validation_alias=AliasChoices("DATABASE_URL", "database_url"),
+        description="Database connection URL",
+    )
 
     @property
     def app_env(self) -> str:

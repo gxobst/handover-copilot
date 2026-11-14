@@ -86,6 +86,9 @@ class InMemoryEventRepository(EventRepository):
 _in_memory_repository = InMemoryEventRepository()
 
 
-def get_event_repository() -> EventRepository:
-    """FastAPI dependency provider for the event repository."""
-    return _in_memory_repository
+def __getattr__(name: str):
+    if name in ("SqlEventRepository", "get_event_repository"):
+        from app.db import repo
+        return getattr(repo, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
