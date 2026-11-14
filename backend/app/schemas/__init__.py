@@ -8,6 +8,7 @@ from .reports import (
     ReportContent,
     ReportGenerateRequest,
     ReportResponse,
+    ReportSummary,
 )
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "ReportContent",
     "ReportGenerateRequest",
     "ReportResponse",
+    "ReportSummary",
     "SHIFT_KEY_REGEX",
 ]

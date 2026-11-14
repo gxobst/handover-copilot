@@ -59,6 +59,20 @@ class GenerationFailedException(StarletteHTTPException):
         self.title = "Generation Failed"
 
 
+class ReportNotFoundException(StarletteHTTPException):
+    """Exception raised when a handover report is not found by ID."""
+
+    def __init__(
+        self,
+        report_id: object,
+    ) -> None:
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report with id '{report_id}' not found",
+        )
+        self.title = "Report Not Found"
+
+
 async def http_exception_handler(
     request: Request,
     exc: StarletteHTTPException,

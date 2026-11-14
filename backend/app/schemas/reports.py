@@ -57,6 +57,26 @@ class ReportGenerateRequest(BaseModel):
     )
 
 
+class ReportSummary(BaseModel):
+    """Summary schema for listing historical handover reports (plan.md §8).
+
+    Excludes full content fields (summary, open_actions, safety_notes) for lightweight listing.
+    """
+
+    id: UUID
+    shift_key: str = Field(
+        ...,
+        pattern=SHIFT_KEY_REGEX,
+        description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
+    )
+    version: int = Field(..., ge=1, description="Report version for this shift (starts at 1)")
+    model_used: str = Field(..., description="LLM model identifier used for generation")
+    event_count: int = Field(..., ge=0, description="Number of events covered in the report")
+    created_at: datetime = Field(..., description="Timestamp of report generation (UTC)")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ReportResponse(BaseModel):
     """Schema for returning a persisted shift handover report."""
 

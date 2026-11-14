@@ -15,6 +15,7 @@ from app.schemas import (
     ProblemDetails,
     ReportContent,
     ReportResponse,
+    ReportSummary,
     SHIFT_KEY_REGEX,
 )
 
@@ -495,6 +496,94 @@ def test_report_response_numeric_boundaries():
     # event_count = 0 (pass)
     resp_ec0 = ReportResponse(version=1, event_count=0, **base_kwargs)
     assert resp_ec0.event_count == 0
+
+
+# ---------------------------------------------------------------------------
+# ReportSummary Schema Tests
+# ---------------------------------------------------------------------------
+
+
+def test_report_summary_valid():
+    """Verify ReportSummary valid instantiation and field values."""
+    report_id = uuid4()
+    now = datetime.now(timezone.utc)
+    summary = ReportSummary(
+        id=report_id,
+        shift_key="2026-11-14-early",
+        version=1,
+        model_used="gemini-3.5-flash-lite",
+        event_count=5,
+        created_at=now,
+    )
+    assert summary.id == report_id
+    assert summary.shift_key == "2026-11-14-early"
+    assert summary.version == 1
+    assert summary.model_used == "gemini-3.5-flash-lite"
+    assert summary.event_count == 5
+    assert summary.created_at == now
+    dumped = summary.model_dump()
+    assert "summary" not in dumped
+    assert "open_actions" not in dumped
+    assert "safety_notes" not in dumped
+
+
+def test_report_summary_from_report_response_or_orm():
+    """Verify ReportSummary can be validated from ORM object or full ReportResponse."""
+    report_id = uuid4()
+    now = datetime.now(timezone.utc)
+    full_report = ReportResponse(
+        id=report_id,
+        shift_key="2026-11-14-late",
+        version=3,
+        summary="Complete shift summary",
+        open_actions=[OpenAction(action="Fix valve", owner="Tech", priority=ActionPriority.HIGH)],
+        safety_notes=["Guard replaced"],
+        model_used="gemini-3.1-flash-lite",
+        event_count=7,
+        created_at=now,
+    )
+    summary = ReportSummary.model_validate(full_report)
+    assert summary.id == report_id
+    assert summary.shift_key == "2026-11-14-late"
+    assert summary.version == 3
+    assert summary.model_used == "gemini-3.1-flash-lite"
+    assert summary.event_count == 7
+    assert summary.created_at == now
+
+    # Also from mock ORM
+    mock_orm = MockORMObject(
+        id=report_id,
+        shift_key="2026-11-14-night",
+        version=2,
+        model_used="gemini-3.5-flash-lite",
+        event_count=0,
+        created_at=now,
+    )
+    summary_orm = ReportSummary.model_validate(mock_orm)
+    assert summary_orm.shift_key == "2026-11-14-night"
+    assert summary_orm.version == 2
+
+
+def test_report_summary_validations():
+    """Verify ReportSummary enforces shift_key pattern, version >= 1, event_count >= 0."""
+    now = datetime.now(timezone.utc)
+    base = {
+        "id": uuid4(),
+        "model_used": "gemini-3.5-flash-lite",
+        "created_at": now,
+    }
+
+    # Invalid shift_key
+    with pytest.raises(ValidationError):
+        ReportSummary(shift_key="invalid-shift", version=1, event_count=1, **base)
+
+    # Invalid version
+    with pytest.raises(ValidationError):
+        ReportSummary(shift_key="2026-11-14-early", version=0, event_count=1, **base)
+
+    # Invalid event_count
+    with pytest.raises(ValidationError):
+        ReportSummary(shift_key="2026-11-14-early", version=1, event_count=-1, **base)
 
 
 # ---------------------------------------------------------------------------

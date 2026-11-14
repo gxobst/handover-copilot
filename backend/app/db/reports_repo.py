@@ -39,8 +39,17 @@ class ReportRepository(ABC):
         pass
 
     @abstractmethod
-    def get_by_id(self, report_id: UUID) -> Optional[ReportResponse]:
+    def get_by_id(
+        self, id: Optional[UUID] = None, report_id: Optional[UUID] = None
+    ) -> Optional[ReportResponse]:
         """Retrieve a report by its UUID, or None if not found."""
+        pass
+
+    @abstractmethod
+    def list_reports(
+        self, shift_key: Optional[str] = None, limit: Optional[int] = None
+    ) -> list[ReportResponse]:
+        """Retrieve reports, optionally filtered by shift_key and bounded by limit."""
         pass
 
     @abstractmethod
@@ -105,23 +114,43 @@ class InMemoryReportRepository(ReportRepository):
             self._reports[report_id] = report
             return report
 
-    def get_by_id(self, report_id: UUID) -> Optional[ReportResponse]:
+    def get_by_id(
+        self, id: Optional[UUID] = None, report_id: Optional[UUID] = None
+    ) -> Optional[ReportResponse]:
         """Retrieve a report by UUID."""
+        target_id = id if id is not None else report_id
+        if target_id is None:
+            return None
         with self._lock:
-            return self._reports.get(report_id)
+            return self._reports.get(target_id)
+
+    def list_reports(
+        self, shift_key: Optional[str] = None, limit: Optional[int] = None
+    ) -> list[ReportResponse]:
+        """Retrieve reports, optionally filtered by shift_key and bounded by limit.
+
+        When shift_key is specified, returns reports for that shift ordered by version desc.
+        When shift_key is omitted, returns reports across shifts ordered by created_at desc.
+        """
+        with self._lock:
+            if shift_key is not None:
+                matching = [
+                    r for r in self._reports.values() if r.shift_key == shift_key
+                ]
+                sorted_reports = sorted(matching, key=lambda r: r.version, reverse=True)
+            else:
+                matching = list(self._reports.values())
+                sorted_reports = sorted(matching, key=lambda r: r.created_at, reverse=True)
+
+            if limit is not None and limit > 0:
+                return sorted_reports[:limit]
+            return sorted_reports
 
     def list_by_shift(
         self, shift_key: str, limit: Optional[int] = None
     ) -> list[ReportResponse]:
         """Retrieve reports for a shift ordered by version descending."""
-        with self._lock:
-            matching = [
-                r for r in self._reports.values() if r.shift_key == shift_key
-            ]
-            sorted_reports = sorted(matching, key=lambda r: r.version, reverse=True)
-            if limit is not None and limit > 0:
-                return sorted_reports[:limit]
-            return sorted_reports
+        return self.list_reports(shift_key=shift_key, limit=limit)
 
     def clear(self) -> None:
         """Clear all stored reports."""
@@ -172,26 +201,43 @@ class SqlReportRepository(ReportRepository):
             self.session.rollback()
             raise
 
-    def get_by_id(self, report_id: UUID) -> Optional[ReportResponse]:
+    def get_by_id(
+        self, id: Optional[UUID] = None, report_id: Optional[UUID] = None
+    ) -> Optional[ReportResponse]:
         """Retrieve a report by UUID primary key or return None."""
-        report = self.session.get(Report, report_id)
+        target_id = id if id is not None else report_id
+        if target_id is None:
+            return None
+        report = self.session.get(Report, target_id)
         if report is None:
             return None
         return self._to_response(report)
+
+    def list_reports(
+        self, shift_key: Optional[str] = None, limit: Optional[int] = None
+    ) -> list[ReportResponse]:
+        """Retrieve reports, optionally filtered by shift_key and bounded by limit.
+
+        When shift_key is specified, returns reports for that shift ordered by version desc.
+        When shift_key is omitted, returns reports across shifts ordered by created_at desc.
+        """
+        stmt = select(Report)
+        if shift_key is not None:
+            stmt = stmt.where(Report.shift_key == shift_key).order_by(Report.version.desc())
+        else:
+            stmt = stmt.order_by(Report.created_at.desc())
+
+        if limit is not None and limit > 0:
+            stmt = stmt.limit(limit)
+
+        reports = self.session.scalars(stmt).all()
+        return [self._to_response(r) for r in reports]
 
     def list_by_shift(
         self, shift_key: str, limit: Optional[int] = None
     ) -> list[ReportResponse]:
         """Retrieve all reports for a shift ordered by version descending."""
-        stmt = (
-            select(Report)
-            .where(Report.shift_key == shift_key)
-            .order_by(Report.version.desc())
-        )
-        if limit is not None and limit > 0:
-            stmt = stmt.limit(limit)
-        reports = self.session.scalars(stmt).all()
-        return [self._to_response(r) for r in reports]
+        return self.list_reports(shift_key=shift_key, limit=limit)
 
     @staticmethod
     def _to_response(report: Report) -> ReportResponse:
