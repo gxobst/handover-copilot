@@ -1,0 +1,82 @@
+{
+  "timestamp": "2026-11-14T21:33:33.997Z",
+  "passCount": 15,
+  "failCount": 0,
+  "results": [
+    {
+      "step": "1. Page Load",
+      "status": "PASS",
+      "details": "Title: \"Shift Handover Copilot\", URL: http://localhost:5173/"
+    },
+    {
+      "step": "2. Header Title",
+      "status": "PASS",
+      "details": "Brand text verified: \"Shift Handover Copilot\""
+    },
+    {
+      "step": "3.1 Shift Selector Visible",
+      "status": "PASS",
+      "details": "Active shift key badge: \"2026-11-14-early\""
+    },
+    {
+      "step": "3.2 Shift Selection",
+      "status": "PASS",
+      "details": "Changed shift to: \"2026-11-14-night\""
+    },
+    {
+      "step": "4.1 Category Filter Bar",
+      "status": "PASS",
+      "details": "Found 9 filter pills"
+    },
+    {
+      "step": "5. Event Creation",
+      "status": "PASS",
+      "details": "Newly logged event \"QA-Robot-01\" successfully rendered in event feed"
+    },
+    {
+      "step": "6. Category Filter",
+      "status": "PASS",
+      "details": "Switched filter to Quality category"
+    },
+    {
+      "step": "7.1 Generate Button Present",
+      "status": "PASS",
+      "details": "Button text: \"Regenerate Handover\""
+    },
+    {
+      "step": "7.2 Report View",
+      "status": "PASS",
+      "details": "Executive Summary visible: true"
+    },
+    {
+      "step": "8. Report History Tab",
+      "status": "PASS",
+      "details": "Rendered 0 historical version snapshots"
+    },
+    {
+      "step": "9.1 Admin Dialog Opened",
+      "status": "PASS",
+      "details": "Admin modal dialog displayed with role=\"dialog\""
+    },
+    {
+      "step": "9.2 Admin Authentication",
+      "status": "PASS",
+      "details": "Authenticated as Admin status: true"
+    },
+    {
+      "step": "9.3 Model Presets",
+      "status": "PASS",
+      "details": "\"Default Models\" preset loaded into active inputs"
+    },
+    {
+      "step": "9.4 Admin Modal Dismissal",
+      "status": "PASS",
+      "details": "Modal dismissed via Escape (closed: true)"
+    },
+    {
+      "step": "10. Full E2E Verification",
+      "status": "PASS",
+      "details": "All application areas exercised successfully in real browser"
+    }
+  ]
+}
