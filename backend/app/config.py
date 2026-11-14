@@ -58,6 +58,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("FALLBACK_MODEL", "fallback_model"),
         description="Fallback Gemini model name for report generation",
     )
+    admin_token: str = Field(
+        default="dev-admin-secret-key-12345",
+        validation_alias=AliasChoices("ADMIN_TOKEN", "admin_token"),
+        description="Admin token for bearer authentication against admin API",
+    )
 
     @property
     def app_env(self) -> str:

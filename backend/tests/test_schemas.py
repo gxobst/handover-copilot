@@ -8,6 +8,8 @@ from pydantic import ValidationError
 
 from app.schemas import (
     ActionPriority,
+    AdminSettingsResponse,
+    AdminSettingsUpdate,
     Category,
     EventCreate,
     EventResponse,
@@ -656,3 +658,103 @@ def test_problem_details_serialization_with_trace_id():
 
     json_str = problem.model_dump_json()
     assert f'"trace_id":"{trace}"' in json_str
+
+
+# ---------------------------------------------------------------------------
+# Admin Settings Schema Tests (Issue #8)
+# ---------------------------------------------------------------------------
+
+
+def test_admin_settings_response_valid():
+    """Verify AdminSettingsResponse instantiation and field types."""
+    resp = AdminSettingsResponse(
+        active_model="gemini-3.5-flash-lite",
+        fallback_model="gemini-3.1-flash-lite",
+    )
+    assert resp.active_model == "gemini-3.5-flash-lite"
+    assert resp.fallback_model == "gemini-3.1-flash-lite"
+    assert resp.model_dump() == {
+        "active_model": "gemini-3.5-flash-lite",
+        "fallback_model": "gemini-3.1-flash-lite",
+    }
+
+
+def test_admin_settings_response_forbids_extra_fields():
+    """Verify AdminSettingsResponse rejects unknown extra fields."""
+    with pytest.raises(ValidationError):
+        AdminSettingsResponse(
+            active_model="gemini-3.5-flash-lite",
+            fallback_model="gemini-3.1-flash-lite",
+            extra_field="invalid",
+        )
+
+
+def test_admin_settings_update_active_model_only():
+    """Verify AdminSettingsUpdate with active_model only."""
+    up = AdminSettingsUpdate(active_model="gemini-2.5-flash-lite")
+    assert up.active_model == "gemini-2.5-flash-lite"
+    assert up.fallback_model is None
+
+
+def test_admin_settings_update_fallback_model_only():
+    """Verify AdminSettingsUpdate with fallback_model only."""
+    up = AdminSettingsUpdate(fallback_model="gemini-3.5-flash")
+    assert up.active_model is None
+    assert up.fallback_model == "gemini-3.5-flash"
+
+
+def test_admin_settings_update_strips_whitespace():
+    """Verify AdminSettingsUpdate trims whitespace from model names."""
+    up = AdminSettingsUpdate(
+        active_model="  gemini-2.5-flash-lite  ",
+        fallback_model="\tgemini-3.1-flash-lite\n",
+    )
+    assert up.active_model == "gemini-2.5-flash-lite"
+    assert up.fallback_model == "gemini-3.1-flash-lite"
+
+
+def test_admin_settings_update_rejects_empty_dict():
+    """Verify AdminSettingsUpdate rejects empty payload {}. """
+    with pytest.raises(ValidationError) as exc:
+        AdminSettingsUpdate.model_validate({})
+    assert "At least one of active_model or fallback_model must be provided" in str(exc.value)
+
+
+def test_admin_settings_update_rejects_null_values():
+    """Verify AdminSettingsUpdate rejects explicit null values."""
+    with pytest.raises(ValidationError) as exc:
+        AdminSettingsUpdate.model_validate({"active_model": None})
+    assert "cannot be null" in str(exc.value)
+
+    with pytest.raises(ValidationError) as exc:
+        AdminSettingsUpdate.model_validate({"fallback_model": None})
+    assert "cannot be null" in str(exc.value)
+
+
+def test_admin_settings_update_rejects_empty_or_whitespace_strings():
+    """Verify AdminSettingsUpdate rejects empty string and whitespace-only string."""
+    with pytest.raises(ValidationError) as exc:
+        AdminSettingsUpdate.model_validate({"active_model": ""})
+    assert "cannot be empty or whitespace" in str(exc.value)
+
+    with pytest.raises(ValidationError) as exc:
+        AdminSettingsUpdate.model_validate({"fallback_model": "   "})
+    assert "cannot be empty or whitespace" in str(exc.value)
+
+
+def test_admin_settings_update_rejects_invalid_pattern():
+    """Verify AdminSettingsUpdate pattern enforcement (^[-a-zA-Z0-9._]+$)."""
+    invalid_cases = ["model with space", "model/path", "model:tag", "model@org"]
+    for case in invalid_cases:
+        with pytest.raises(ValidationError) as exc:
+            AdminSettingsUpdate.model_validate({"active_model": case})
+        assert "invalid characters" in str(exc.value)
+
+
+def test_admin_settings_update_pattern_only_accepts_non_allowlist():
+    """Verify AdminSettingsUpdate accepts arbitrary valid patterns (not enum-locked)."""
+    valid_cases = ["gemini-2.5-flash-lite", "custom.model_v1.0", "experimental-model-99"]
+    for case in valid_cases:
+        up = AdminSettingsUpdate.model_validate({"active_model": case})
+        assert up.active_model == case
+

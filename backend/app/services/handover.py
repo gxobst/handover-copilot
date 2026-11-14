@@ -7,7 +7,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import AppSetting
 from app.db.repo import (
     EventRepository,
     ReportRepository,
@@ -19,6 +18,7 @@ from app.errors import GenerationFailedException
 from app.llm.client import LLMClient, get_llm_client
 from app.llm.prompt import build_user_prompt
 from app.schemas.reports import ReportContent, ReportResponse
+from app.settings_store import get_admin_settings
 
 
 class HandoverService:
@@ -39,34 +39,10 @@ class HandoverService:
         self.db = db
 
     def _resolve_model_settings(self) -> tuple[str, str]:
-        """Resolve active and fallback model names per-request from DB app_settings or app Settings."""
-        active = self.settings.active_model
-        fallback = self.settings.fallback_model
-
+        """Resolve active and fallback model names per-request via settings_store."""
         session = self.db or getattr(self.report_repo, "session", None)
-        if session is not None and isinstance(session, Session):
-            try:
-                active_row = session.get(AppSetting, "active_model")
-                if (
-                    active_row
-                    and hasattr(active_row, "value")
-                    and isinstance(active_row.value, str)
-                    and active_row.value.strip()
-                ):
-                    active = active_row.value.strip()
-
-                fallback_row = session.get(AppSetting, "fallback_model")
-                if (
-                    fallback_row
-                    and hasattr(fallback_row, "value")
-                    and isinstance(fallback_row.value, str)
-                    and fallback_row.value.strip()
-                ):
-                    fallback = fallback_row.value.strip()
-            except Exception:
-                pass
-
-        return active, fallback
+        admin_settings = get_admin_settings(db=session, settings=self.settings)
+        return admin_settings.active_model, admin_settings.fallback_model
 
     def _ensure_safety_notes_coverage(
         self,

@@ -1,5 +1,6 @@
 """Schemas package exports."""
 
+from .admin import AdminSettingsResponse, AdminSettingsUpdate
 from .errors import ProblemDetails
 from .events import Category, EventCreate, EventResponse, SHIFT_KEY_REGEX
 from .reports import (
@@ -13,6 +14,8 @@ from .reports import (
 
 __all__ = [
     "ActionPriority",
+    "AdminSettingsResponse",
+    "AdminSettingsUpdate",
     "Category",
     "EventCreate",
     "EventResponse",
