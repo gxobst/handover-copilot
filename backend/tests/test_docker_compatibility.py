@@ -276,7 +276,11 @@ def test_admin_settings_get(client: TestClient) -> None:
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert "active_model" in data
+    assert "activeModel" in data
     assert "fallback_model" in data
+    assert "fallbackModel" in data
+    assert data["activeModel"] == data["active_model"]
+    assert data["fallbackModel"] == data["fallback_model"]
 
 
 def test_admin_settings_put_camel_case(client: TestClient) -> None:
@@ -289,7 +293,12 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     )
     assert res1.status_code == status.HTTP_200_OK
     data1 = res1.json()
+    assert "active_model" in data1
+    assert "activeModel" in data1
+    assert "fallback_model" in data1
+    assert "fallbackModel" in data1
     assert data1["active_model"] == "gemini-test-active"
+    assert data1["activeModel"] == "gemini-test-active"
 
     # Update fallbackModel only
     res2 = client.put(
@@ -299,7 +308,12 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     )
     assert res2.status_code == status.HTTP_200_OK
     data2 = res2.json()
+    assert "active_model" in data2
+    assert "activeModel" in data2
+    assert "fallback_model" in data2
+    assert "fallbackModel" in data2
     assert data2["fallback_model"] == "gemini-test-fallback"
+    assert data2["fallbackModel"] == "gemini-test-fallback"
 
     # Update both simultaneously with camelCase
     res3 = client.put(
@@ -312,8 +326,14 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     )
     assert res3.status_code == status.HTTP_200_OK
     data3 = res3.json()
+    assert "active_model" in data3
+    assert "activeModel" in data3
+    assert "fallback_model" in data3
+    assert "fallbackModel" in data3
     assert data3["active_model"] == "gemini-dual-active"
+    assert data3["activeModel"] == "gemini-dual-active"
     assert data3["fallback_model"] == "gemini-dual-fallback"
+    assert data3["fallbackModel"] == "gemini-dual-fallback"
 
 
 def test_admin_settings_put_snake_case(client: TestClient) -> None:
@@ -325,7 +345,13 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
         json={"active_model": "gemini-snake-active"},
     )
     assert res1.status_code == status.HTTP_200_OK
-    assert res1.json()["active_model"] == "gemini-snake-active"
+    data1 = res1.json()
+    assert "active_model" in data1
+    assert "activeModel" in data1
+    assert "fallback_model" in data1
+    assert "fallbackModel" in data1
+    assert data1["active_model"] == "gemini-snake-active"
+    assert data1["activeModel"] == "gemini-snake-active"
 
     # Update fallback_model only
     res2 = client.put(
@@ -334,7 +360,13 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
         json={"fallback_model": "gemini-snake-fallback"},
     )
     assert res2.status_code == status.HTTP_200_OK
-    assert res2.json()["fallback_model"] == "gemini-snake-fallback"
+    data2 = res2.json()
+    assert "active_model" in data2
+    assert "activeModel" in data2
+    assert "fallback_model" in data2
+    assert "fallbackModel" in data2
+    assert data2["fallback_model"] == "gemini-snake-fallback"
+    assert data2["fallbackModel"] == "gemini-snake-fallback"
 
     # Update both simultaneously
     res3 = client.put(
@@ -346,5 +378,12 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
         },
     )
     assert res3.status_code == status.HTTP_200_OK
-    assert res3.json()["active_model"] == "gemini-both-active"
-    assert res3.json()["fallback_model"] == "gemini-both-fallback"
+    data3 = res3.json()
+    assert "active_model" in data3
+    assert "activeModel" in data3
+    assert "fallback_model" in data3
+    assert "fallbackModel" in data3
+    assert data3["active_model"] == "gemini-both-active"
+    assert data3["activeModel"] == "gemini-both-active"
+    assert data3["fallback_model"] == "gemini-both-fallback"
+    assert data3["fallbackModel"] == "gemini-both-fallback"

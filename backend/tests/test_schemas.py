@@ -673,9 +673,13 @@ def test_admin_settings_response_valid():
     )
     assert resp.active_model == "gemini-3.5-flash-lite"
     assert resp.fallback_model == "gemini-3.1-flash-lite"
+    assert resp.activeModel == "gemini-3.5-flash-lite"
+    assert resp.fallbackModel == "gemini-3.1-flash-lite"
     assert resp.model_dump() == {
         "active_model": "gemini-3.5-flash-lite",
         "fallback_model": "gemini-3.1-flash-lite",
+        "activeModel": "gemini-3.5-flash-lite",
+        "fallbackModel": "gemini-3.1-flash-lite",
     }
 
 

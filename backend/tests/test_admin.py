@@ -208,6 +208,8 @@ def test_get_settings_default_values(client: TestClient) -> None:
     assert data == {
         "active_model": "google/gemini-3.5-flash-lite",
         "fallback_model": "google/gemini-3.1-flash-lite",
+        "activeModel": "google/gemini-3.5-flash-lite",
+        "fallbackModel": "google/gemini-3.1-flash-lite",
     }
     validated = AdminSettingsResponse.model_validate(data)
     assert validated.active_model == "google/gemini-3.5-flash-lite"
@@ -225,6 +227,8 @@ def test_get_settings_reads_from_database(client: TestClient, db_session: Sessio
     assert response.json() == {
         "active_model": "gemini-custom-active",
         "fallback_model": "gemini-custom-fallback",
+        "activeModel": "gemini-custom-active",
+        "fallbackModel": "gemini-custom-fallback",
     }
 
 
@@ -344,6 +348,8 @@ def test_put_settings_update_active_model_only(client: TestClient, db_session: S
     assert response.json() == {
         "active_model": "gemini-3.5-flash",
         "fallback_model": "google/gemini-3.1-flash-lite",
+        "activeModel": "gemini-3.5-flash",
+        "fallbackModel": "google/gemini-3.1-flash-lite",
     }
 
     # Verify persistence in DB
@@ -363,6 +369,8 @@ def test_put_settings_update_fallback_model_only(client: TestClient, db_session:
     assert response.json() == {
         "active_model": "google/gemini-3.5-flash-lite",
         "fallback_model": "gemini-3.5-flash",
+        "activeModel": "google/gemini-3.5-flash-lite",
+        "fallbackModel": "gemini-3.5-flash",
     }
 
     # Verify persistence in DB
@@ -385,6 +393,8 @@ def test_put_settings_update_both_models(client: TestClient, db_session: Session
     assert response.json() == {
         "active_model": "gemini-4-argon",
         "fallback_model": "gemini-3.5-flash-lite",
+        "activeModel": "gemini-4-argon",
+        "fallbackModel": "gemini-3.5-flash-lite",
     }
 
     assert db_session.get(AppSetting, SETTING_ACTIVE_MODEL).value == "gemini-4-argon"
@@ -452,6 +462,8 @@ def test_immediate_read_after_write(client: TestClient) -> None:
     assert get3.json() == {
         "active_model": "gemini-2.5-flash-lite",
         "fallback_model": "gemini-3.5-flash",
+        "activeModel": "gemini-2.5-flash-lite",
+        "fallbackModel": "gemini-3.5-flash",
     }
 
 

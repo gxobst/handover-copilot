@@ -52,13 +52,26 @@ class AdminSettingsResponse(BaseModel):
         description="Fallback model name used if active model fails",
     )
 
+    @computed_field
     @property
     def activeModel(self) -> str:
         return self.active_model
 
+    @computed_field
     @property
     def fallbackModel(self) -> str:
         return self.fallback_model
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_camel_case_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if "activeModel" in data and "active_model" in data:
+                data.pop("activeModel", None)
+            if "fallbackModel" in data and "fallback_model" in data:
+                data.pop("fallbackModel", None)
+        return data
 
 
 class AdminSettingsUpdate(BaseModel):
