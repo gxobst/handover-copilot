@@ -261,8 +261,7 @@ paths:
           in: query
           required: false
           schema:
-            type: string
-            pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+            $ref: '#/components/schemas/ShiftKey'
           description: Optional shift identifier filter
           x-renamed-from: shift_key
         - name: limit
@@ -428,6 +427,7 @@ paths:
       security:
         - WebhookTokenHeader: []
         - BearerAuth: []
+        - WebhookTokenQuery: []
       x-source: "backend/app/routers/relay.py:relay_webhook"
       parameters:
         - name: X-Webhook-Token
@@ -435,7 +435,17 @@ paths:
           required: false
           schema:
             type: string
-          description: Shared secret token (alternatively provide as Authorization Bearer token)
+          description: Recommended shared secret token header (alternatively provide as Authorization Bearer token).
+          example: "dev-relay-token-secret-123"
+        - name: token
+          in: query
+          required: false
+          deprecated: true
+          schema:
+            type: string
+          description: >
+            Legacy shared secret token passed via URL query parameter.
+            Deprecated: prefer 'X-Webhook-Token' or 'Authorization: Bearer' headers to prevent token leakage in access logs.
           example: "dev-relay-token-secret-123"
       requestBody:
         required: true
@@ -510,6 +520,13 @@ components:
       in: header
       name: X-Webhook-Token
       description: Secret shared token for Grafana alert webhooks (RELAY_WEBHOOK_TOKEN).
+    WebhookTokenQuery:
+      type: apiKey
+      in: query
+      name: token
+      description: >
+        Secret shared token passed via URL query parameter (RELAY_WEBHOOK_TOKEN).
+        Deprecated in favor of X-Webhook-Token or Authorization Bearer header to avoid token exposure in logs.
 
   parameters:
     ShiftKeyQuery:
@@ -517,8 +534,7 @@ components:
       in: query
       required: true
       schema:
-        type: string
-        pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+        $ref: '#/components/schemas/ShiftKey'
       description: Shift identifier in YYYY-MM-DD-(early|late|night) format.
       example: "2026-11-14-early"
       x-renamed-from: shift_key
@@ -613,6 +629,13 @@ components:
           example: "local"
       x-source: "backend/app/routers/health.py:HealthResponse"
 
+    ShiftKey:
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+      description: Strict shift identifier in YYYY-MM-DD-(early|late|night) format.
+      example: "2026-11-14-early"
+      x-source: "backend/app/schemas/events.py:SHIFT_KEY_REGEX"
+
     Category:
       type: string
       enum:
@@ -632,10 +655,7 @@ components:
         - note
       properties:
         shiftKey:
-          type: string
-          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
-          description: Shift identifier in YYYY-MM-DD-(early|late|night) format.
-          example: "2026-11-14-early"
+          $ref: '#/components/schemas/ShiftKey'
           x-renamed-from: shift_key
         machine:
           type: string
@@ -668,9 +688,7 @@ components:
           description: Unique event identifier.
           example: "41f34ec4-f489-4362-869d-9555cd9c0f98"
         shiftKey:
-          type: string
-          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
-          example: "2026-11-14-early"
+          $ref: '#/components/schemas/ShiftKey'
           x-renamed-from: shift_key
         machine:
           type: string
@@ -725,10 +743,7 @@ components:
         - shiftKey
       properties:
         shiftKey:
-          type: string
-          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
-          description: Shift identifier to generate report for.
-          example: "2026-11-14-early"
+          $ref: '#/components/schemas/ShiftKey'
           x-renamed-from: shift_key
       x-source: "backend/app/schemas/reports.py:ReportGenerateRequest"
 
@@ -747,9 +762,7 @@ components:
           format: uuid
           example: "2cff7f41-1053-4548-a6f5-153fc558a04d"
         shiftKey:
-          type: string
-          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
-          example: "2026-11-14-early"
+          $ref: '#/components/schemas/ShiftKey'
           x-renamed-from: shift_key
         version:
           type: integer
@@ -792,9 +805,7 @@ components:
           format: uuid
           example: "2cff7f41-1053-4548-a6f5-153fc558a04d"
         shiftKey:
-          type: string
-          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
-          example: "2026-11-14-early"
+          $ref: '#/components/schemas/ShiftKey'
           x-renamed-from: shift_key
         version:
           type: integer
