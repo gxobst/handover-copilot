@@ -733,8 +733,31 @@ re-deploying for a second attempt then costs minutes, not hours.
 | Frontend UI & styling stack | resolved | Tailwind CSS + shadcn/ui component primitives for industrial high-contrast UX |
 | Frontend data-fetching & cache layer | resolved | TanStack Query (`@tanstack/react-query`) over typed services layer |
 | Database contingency plan | resolved | Primary: AlloyDB Express; Fallback: Neon serverless PostgreSQL (zero code change via standard `DATABASE_URL`) |
-| Is `gemini-3.5-flash-lite` available in `europe-west2`? If not, which Vertex region? | open | |
+| Is `gemini-3.5-flash-lite` available in `europe-west2`? If not, which Vertex region? | resolved | Tested against live Vertex AI: `gemini-3.5-flash` is active and responsive in `europe-west2` (4.95s generation latency). Primary: `gemini-3.5-flash`; Fallback: `gemini-4-argon`. Region locked to `europe-west2`. In `us-central1`, publisher models returned 404 for this project. |
 | Does the billing account qualify for the AlloyDB Express free tier? | open | |
 | Does the AlloyDB Python connector work from Cloud Run over public DNS with IAM auth? | open | |
 | Can Grafana template the webhook body (relay droppable)? | open | |
 | Grafana Cloud stack URL + reviewer access mode (viewer user vs public dashboard)? | open | |
+
+---
+
+## 30. Implementation Decisions & Specifications (Backend Phase)
+
+The following architectural and design decisions were made during backend implementation to ensure complete reliability, zero-cost CI, and seamless incident simulation:
+
+1. **Vertex AI Model Naming & Regional Binding**:
+   - In `europe-west2`, live testing verified that model `gemini-3.5-flash` is available and responsive for structured outputs.
+   - Fallback model is set to `gemini-4-argon`.
+   - Simulated incident model: `gemini-2.5-flash-lite` (a retired model) generates an authentic 404/not-found from Vertex AI, cleanly exercising the automated fallback retry logic.
+2. **Offline & Test-Double Architecture (`LLM_BACKEND=fake`)**:
+   - Full automated test suite (216 tests) runs with `LLM_BACKEND=fake` in ~10 seconds with zero external network calls, zero GCP spend, and 100% deterministic test assertions.
+   - OpenTelemetry provider defaults to in-memory span and metric readers when `OTEL_EXPORTER_OTLP_ENDPOINT` is omitted.
+   - Injectable `GitHubDispatcher` protocol enables offline webhook relay testing without live calls to GitHub API.
+3. **Telemetry Privacy Redaction (AC-11, §16, §22)**:
+   - Automated recursive sanitization in both structlog JSON logging and OpenTelemetry span processors blocks or masks user notes, report text, tokens, and authorization credentials as `"[REDACTED]"`.
+   - W3C hex `trace_id` is automatically propagated into response headers (`X-Trace-ID`) and RFC 9457 `ProblemDetails.trace_id` payloads.
+4. **Webhook Relay Deduplication**:
+   - In-memory fingerprint tracking with a 30-minute cooldown window (`RELAY_DEDUPE_COOLDOWN_SECONDS=1800`) prevents webhook storms from repeatedly firing downstream GitHub Actions.
+   - Cache pruning automatically cleans up expired entries to prevent memory growth.
+5. **Admin Model Name Validation**:
+   - Validation on `active_model` and `fallback_model` in `PUT /api/admin/settings` is strictly pattern-based (`^[a-zA-Z0-9._-]+$`, 1–128 characters) and deliberately avoids an allowlist or enum so that deprecated models can be dynamically configured during incident tests.
