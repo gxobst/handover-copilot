@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.errors import http_exception_handler, request_validation_exception_handler
-from app.routers import admin, events, health, reports
+from app.routers import admin, events, health, relay, reports
 from app.telemetry import TelemetryMiddleware, init_telemetry
 
 
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(reports.router)
     app.include_router(admin.router)
+    app.include_router(relay.router)
 
     return app
 

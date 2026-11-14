@@ -11,6 +11,15 @@ from .reports import (
     ReportResponse,
     ReportSummary,
 )
+from .relay import (
+    GitHubDispatchClientPayload,
+    GitHubDispatchPayload,
+    GrafanaAlertAnnotations,
+    GrafanaAlertItem,
+    GrafanaAlertLabels,
+    GrafanaAlertPayload,
+    RelayResponse,
+)
 
 __all__ = [
     "ActionPriority",
@@ -19,8 +28,15 @@ __all__ = [
     "Category",
     "EventCreate",
     "EventResponse",
+    "GitHubDispatchClientPayload",
+    "GitHubDispatchPayload",
+    "GrafanaAlertAnnotations",
+    "GrafanaAlertItem",
+    "GrafanaAlertLabels",
+    "GrafanaAlertPayload",
     "OpenAction",
     "ProblemDetails",
+    "RelayResponse",
     "ReportContent",
     "ReportGenerateRequest",
     "ReportResponse",

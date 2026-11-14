@@ -46,3 +46,33 @@ def require_admin_token(
         )
 
     return token
+
+
+def require_relay_token(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> str:
+    """Validate webhook token against RELAY_WEBHOOK_TOKEN using constant-time comparison.
+
+    Accepts token via 'X-Webhook-Token' header or 'Authorization: Bearer <token>'.
+    Raises HTTP 401 Unauthorized with RFC 9457 ProblemDetails if missing or invalid.
+    """
+    token: Optional[str] = request.headers.get("X-Webhook-Token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing webhook authentication token. Provide 'X-Webhook-Token' header or 'Authorization: Bearer <token>'",
+        )
+
+    if not secrets.compare_digest(token, settings.relay_webhook_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook authentication token",
+        )
+
+    return token

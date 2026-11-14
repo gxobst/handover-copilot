@@ -1,5 +1,6 @@
 from functools import lru_cache
-from pydantic import AliasChoices, Field
+from typing import Any
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,6 +64,35 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ADMIN_TOKEN", "admin_token"),
         description="Admin token for bearer authentication against admin API",
     )
+    relay_webhook_token: str = Field(
+        default="dev-relay-token-secret-123",
+        validation_alias=AliasChoices("RELAY_WEBHOOK_TOKEN", "relay_webhook_token"),
+        description="Shared secret for validating incoming relay webhooks",
+    )
+    github_dispatch_pat: str = Field(
+        default="",
+        validation_alias=AliasChoices("GITHUB_DISPATCH_PAT", "github_dispatch_pat"),
+        description="GitHub personal access token for repository dispatch",
+    )
+    github_repository: str = Field(
+        default="gxobst/handover-copilot",
+        validation_alias=AliasChoices("GITHUB_REPOSITORY", "github_repository"),
+        description="Target GitHub repository for repository dispatch (owner/repo)",
+    )
+    relay_dedupe_cooldown_seconds: int = Field(
+        default=1800,
+        validation_alias=AliasChoices(
+            "RELAY_DEDUPE_COOLDOWN_SECONDS", "relay_dedupe_cooldown_seconds"
+        ),
+        description="Cooldown window in seconds for alert fingerprint deduplication",
+    )
+
+    @field_validator("relay_webhook_token", mode="before")
+    @classmethod
+    def _validate_relay_webhook_token(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "dev-relay-token-secret-123"
+        return str(v)
     otel_exporter_otlp_endpoint: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
