@@ -49,12 +49,12 @@ class Settings(BaseSettings):
         description="LLM request timeout in seconds",
     )
     active_model: str = Field(
-        default="gemini-3.5-flash",
+        default="gemini-3.5-flash-lite",
         validation_alias=AliasChoices("ACTIVE_MODEL", "active_model"),
         description="Active Gemini model name for report generation",
     )
     fallback_model: str = Field(
-        default="gemini-4-argon",
+        default="gemini-3.1-flash-lite",
         validation_alias=AliasChoices("FALLBACK_MODEL", "fallback_model"),
         description="Fallback Gemini model name for report generation",
     )

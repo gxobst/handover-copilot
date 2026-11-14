@@ -142,6 +142,41 @@ def test_build_user_prompt_empty_events():
 
 
 # -----------------------------------------------------------------------------
+# LLM Settings & Configuration Tests
+# -----------------------------------------------------------------------------
+
+
+def test_settings_default_model_values():
+    """Verify Settings defaults for active_model and fallback_model per plan.md §0 & §9."""
+    settings = Settings()
+    assert settings.active_model == "gemini-3.5-flash-lite"
+    assert settings.fallback_model == "gemini-3.1-flash-lite"
+    assert settings.llm_backend == "fake"
+    assert settings.gcp_project == ""
+    assert settings.gcp_location == "europe-west2"
+    assert settings.llm_timeout_s == 20.0
+
+
+def test_settings_model_env_aliases(monkeypatch):
+    """Verify ACTIVE_MODEL and FALLBACK_MODEL environment variable aliases work."""
+    monkeypatch.setenv("ACTIVE_MODEL", "custom-active-model")
+    monkeypatch.setenv("FALLBACK_MODEL", "custom-fallback-model")
+    settings = Settings()
+    assert settings.active_model == "custom-active-model"
+    assert settings.fallback_model == "custom-fallback-model"
+
+
+def test_fake_llm_client_recognizes_default_models():
+    """Verify FakeLLMClient accepts both default active and fallback models from Settings."""
+    settings = Settings()
+    client = FakeLLMClient()
+    for model_name in [settings.active_model, settings.fallback_model]:
+        assert model_name in KNOWN_MODELS
+        res = client.generate_handover(prompt="Shift: 2026-11-14-early", model_name=model_name)
+        assert isinstance(res, ReportContent)
+
+
+# -----------------------------------------------------------------------------
 # Factory Function Tests
 # -----------------------------------------------------------------------------
 
@@ -233,7 +268,7 @@ def test_fake_llm_client_no_safety_events():
         {"time": "08:00", "machine": "Packaging 1", "category": "info", "note": "Scheduled cleanup"},
     ]
     prompt = build_user_prompt("2026-11-14-early", events)
-    result = client.generate_handover(prompt=prompt, model_name="gemini-3.5-flash")
+    result = client.generate_handover(prompt=prompt, model_name="gemini-3.5-flash-lite")
 
     assert result.safety_notes == []
     assert len(result.open_actions) >= 1
@@ -283,7 +318,7 @@ def test_vertex_llm_client_configures_parameters_correctly():
 
     result = client.generate_handover(
         prompt="Shift: 2026-11-14-early",
-        model_name="gemini-3.5-flash",
+        model_name="gemini-3.5-flash-lite",
         timeout_s=15.0,
     )
 
@@ -293,7 +328,7 @@ def test_vertex_llm_client_configures_parameters_correctly():
     # Assert SDK call arguments
     mock_genai_client.models.generate_content.assert_called_once()
     call_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
-    assert call_kwargs["model"] == "gemini-3.5-flash"
+    assert call_kwargs["model"] == "gemini-3.5-flash-lite"
     assert call_kwargs["contents"] == "Shift: 2026-11-14-early"
 
     config: types.GenerateContentConfig = call_kwargs["config"]
@@ -329,7 +364,7 @@ def test_vertex_llm_client_parses_json_text_fallback():
     client = VertexLLMClient(client=mock_genai_client)
     result = client.generate_handover(
         prompt="Shift: test",
-        model_name="gemini-3.5-flash",
+        model_name="gemini-3.5-flash-lite",
     )
 
     assert isinstance(result, ReportContent)
@@ -362,7 +397,7 @@ def test_vertex_llm_client_handles_generic_api_error_as_llm_error():
     with pytest.raises(LLMError, match="Vertex AI API error \\(500\\)"):
         client.generate_handover(
             prompt="Shift: test",
-            model_name="gemini-3.5-flash",
+            model_name="gemini-3.5-flash-lite",
         )
 
 
@@ -378,5 +413,5 @@ def test_vertex_llm_client_handles_invalid_schema_as_llm_error():
     with pytest.raises(LLMError, match="Failed to parse ReportContent"):
         client.generate_handover(
             prompt="Shift: test",
-            model_name="gemini-3.5-flash",
+            model_name="gemini-3.5-flash-lite",
         )
