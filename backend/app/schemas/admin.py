@@ -3,7 +3,16 @@
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 # Model names must match a non-empty character pattern (allowing alphanumeric, dot, underscore, dash, slash)
 MODEL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._/-]+$")
@@ -34,12 +43,22 @@ class AdminSettingsResponse(BaseModel):
 
     active_model: str = Field(
         ...,
+        validation_alias=AliasChoices("active_model", "activeModel"),
         description="Currently active model name used for report generation",
     )
     fallback_model: str = Field(
         ...,
+        validation_alias=AliasChoices("fallback_model", "fallbackModel"),
         description="Fallback model name used if active model fails",
     )
+
+    @property
+    def activeModel(self) -> str:
+        return self.active_model
+
+    @property
+    def fallbackModel(self) -> str:
+        return self.fallback_model
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -49,10 +68,12 @@ class AdminSettingsUpdate(BaseModel):
 
     active_model: Optional[str] = Field(
         default=None,
+        validation_alias=AliasChoices("active_model", "activeModel"),
         description="New active model name (must match ^[a-zA-Z0-9._-]+$)",
     )
     fallback_model: Optional[str] = Field(
         default=None,
+        validation_alias=AliasChoices("fallback_model", "fallbackModel"),
         description="New fallback model name (must match ^[a-zA-Z0-9._-]+$)",
     )
 

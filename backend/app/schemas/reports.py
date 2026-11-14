@@ -4,7 +4,14 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+)
 
 from .events import SHIFT_KEY_REGEX
 
@@ -52,6 +59,7 @@ class ReportGenerateRequest(BaseModel):
 
     shift_key: str = Field(
         ...,
+        validation_alias=AliasChoices("shift_key", "shiftKey"),
         pattern=SHIFT_KEY_REGEX,
         description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
     )
@@ -67,27 +75,112 @@ class ReportSummary(BaseModel):
     shift_key: str = Field(
         ...,
         pattern=SHIFT_KEY_REGEX,
+        validation_alias=AliasChoices("shift_key", "shiftKey"),
         description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
     )
     version: int = Field(..., ge=1, description="Report version for this shift (starts at 1)")
-    model_used: str = Field(..., description="LLM model identifier used for generation")
-    event_count: int = Field(..., ge=0, description="Number of events covered in the report")
-    created_at: datetime = Field(..., description="Timestamp of report generation (UTC)")
+    model_used: str = Field(
+        ...,
+        validation_alias=AliasChoices("model_used", "modelUsed"),
+        description="LLM model identifier used for generation",
+    )
+    event_count: int = Field(
+        ...,
+        ge=0,
+        validation_alias=AliasChoices("event_count", "eventCount"),
+        description="Number of events covered in the report",
+    )
+    created_at: datetime = Field(
+        ...,
+        validation_alias=AliasChoices("created_at", "createdAt"),
+        description="Timestamp of report generation (UTC)",
+    )
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def shiftKey(self) -> str:
+        return self.shift_key
+
+    @computed_field
+    @property
+    def modelUsed(self) -> str:
+        return self.model_used
+
+    @computed_field
+    @property
+    def eventCount(self) -> int:
+        return self.event_count
+
+    @computed_field
+    @property
+    def createdAt(self) -> datetime:
+        return self.created_at
 
 
 class ReportResponse(BaseModel):
     """Schema for returning a persisted shift handover report."""
 
     id: UUID
-    shift_key: str = Field(..., pattern=SHIFT_KEY_REGEX)
+    shift_key: str = Field(
+        ...,
+        pattern=SHIFT_KEY_REGEX,
+        validation_alias=AliasChoices("shift_key", "shiftKey"),
+    )
     version: int = Field(..., ge=1, description="Report version for this shift (starts at 1)")
     summary: str
-    open_actions: list[OpenAction]
-    safety_notes: list[str]
-    model_used: str
-    event_count: int = Field(..., ge=0, description="Number of events covered in the report")
-    created_at: datetime
+    open_actions: list[OpenAction] = Field(
+        ...,
+        validation_alias=AliasChoices("open_actions", "openActions"),
+    )
+    safety_notes: list[str] = Field(
+        ...,
+        validation_alias=AliasChoices("safety_notes", "safetyNotes"),
+    )
+    model_used: str = Field(
+        ...,
+        validation_alias=AliasChoices("model_used", "modelUsed"),
+    )
+    event_count: int = Field(
+        ...,
+        ge=0,
+        validation_alias=AliasChoices("event_count", "eventCount"),
+        description="Number of events covered in the report",
+    )
+    created_at: datetime = Field(
+        ...,
+        validation_alias=AliasChoices("created_at", "createdAt"),
+    )
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def shiftKey(self) -> str:
+        return self.shift_key
+
+    @computed_field
+    @property
+    def modelUsed(self) -> str:
+        return self.model_used
+
+    @computed_field
+    @property
+    def eventCount(self) -> int:
+        return self.event_count
+
+    @computed_field
+    @property
+    def createdAt(self) -> datetime:
+        return self.created_at
+
+    @computed_field
+    @property
+    def openActions(self) -> list[OpenAction]:
+        return self.open_actions
+
+    @computed_field
+    @property
+    def safetyNotes(self) -> list[str]:
+        return self.safety_notes

@@ -4,7 +4,14 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+)
 
 SHIFT_KEY_REGEX = r"^\d{4}-\d{2}-\d{2}-(early|late|night)$"
 
@@ -23,6 +30,7 @@ class EventCreate(BaseModel):
 
     shift_key: str = Field(
         ...,
+        validation_alias=AliasChoices("shift_key", "shiftKey"),
         pattern=SHIFT_KEY_REGEX,
         description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
     )
@@ -47,10 +55,27 @@ class EventResponse(BaseModel):
     """Schema for returning a shift event."""
 
     id: UUID
-    shift_key: str = Field(..., pattern=SHIFT_KEY_REGEX)
+    shift_key: str = Field(
+        ...,
+        pattern=SHIFT_KEY_REGEX,
+        validation_alias=AliasChoices("shift_key", "shiftKey"),
+    )
     machine: str
     category: Category
     note: str
-    created_at: datetime
+    created_at: datetime = Field(
+        ...,
+        validation_alias=AliasChoices("created_at", "createdAt"),
+    )
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def shiftKey(self) -> str:
+        return self.shift_key
+
+    @computed_field
+    @property
+    def createdAt(self) -> datetime:
+        return self.created_at

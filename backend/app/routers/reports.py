@@ -44,7 +44,14 @@ def list_reports(
     shift_key: Optional[str] = Query(
         default=None,
         pattern=SHIFT_KEY_REGEX,
+        alias="shift_key",
         description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
+    ),
+    shiftKey: Optional[str] = Query(
+        default=None,
+        pattern=SHIFT_KEY_REGEX,
+        alias="shiftKey",
+        description="Shift identifier in YYYY-MM-DD-(early|late|night) format (camelCase alias)",
     ),
     limit: int = Query(
         default=20,
@@ -55,7 +62,8 @@ def list_reports(
     repo: ReportRepository = Depends(get_report_repository),
 ) -> list[ReportSummary]:
     """Retrieve report summaries across shifts or for a specific shift."""
-    reports = repo.list_reports(shift_key=shift_key, limit=limit)
+    target_key = shift_key or shiftKey
+    reports = repo.list_reports(shift_key=target_key, limit=limit)
     return [ReportSummary.model_validate(r) for r in reports]
 
 

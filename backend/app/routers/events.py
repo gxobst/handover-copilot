@@ -1,5 +1,6 @@
 """API router for shift event CRUD operations."""
 
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -50,15 +51,28 @@ def create_event(
     description="Retrieve all events for a given shift_key, ordered chronologically ascending.",
 )
 def list_events(
-    shift_key: str = Query(
-        ...,
+    shift_key: Optional[str] = Query(
+        default=None,
         pattern=SHIFT_KEY_REGEX,
+        alias="shift_key",
         description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
+    ),
+    shiftKey: Optional[str] = Query(
+        default=None,
+        pattern=SHIFT_KEY_REGEX,
+        alias="shiftKey",
+        description="Shift identifier in YYYY-MM-DD-(early|late|night) format (camelCase alias)",
     ),
     repo: EventRepository = Depends(get_event_repository),
 ) -> list[EventResponse]:
     """List events matching the shift_key in ascending chronological order."""
-    return repo.list_by_shift(shift_key)
+    target_key = shift_key or shiftKey
+    if not target_key:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="query -> shift_key: Field required",
+        )
+    return repo.list_by_shift(target_key)
 
 
 @router.delete(
