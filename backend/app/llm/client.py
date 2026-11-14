@@ -13,8 +13,12 @@ KNOWN_MODELS = frozenset(
     {
         "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
+        "google/gemini-3.5-flash-lite",
+        "google/gemini-3.1-flash-lite",
         "gemini-3.5-flash",
         "gemini-4-argon",
+        "google/gemini-3.5-flash",
+        "google/gemini-4-argon",
     }
 )
 
@@ -67,9 +71,10 @@ class VertexLLMClient:
             http_options=types.HttpOptions(timeout=int(timeout_s * 1000)),
         )
 
+        api_model = model_name.removeprefix("google/")
         try:
             response = self._client.models.generate_content(
-                model=model_name,
+                model=api_model,
                 contents=prompt,
                 config=config,
             )

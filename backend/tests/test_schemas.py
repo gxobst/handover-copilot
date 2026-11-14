@@ -743,8 +743,8 @@ def test_admin_settings_update_rejects_empty_or_whitespace_strings():
 
 
 def test_admin_settings_update_rejects_invalid_pattern():
-    """Verify AdminSettingsUpdate pattern enforcement (^[-a-zA-Z0-9._]+$)."""
-    invalid_cases = ["model with space", "model/path", "model:tag", "model@org"]
+    """Verify AdminSettingsUpdate pattern enforcement (^[-a-zA-Z0-9._/]+$)."""
+    invalid_cases = ["model with space", "model:tag", "model@org"]
     for case in invalid_cases:
         with pytest.raises(ValidationError) as exc:
             AdminSettingsUpdate.model_validate({"active_model": case})

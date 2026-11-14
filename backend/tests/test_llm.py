@@ -147,14 +147,29 @@ def test_build_user_prompt_empty_events():
 
 
 def test_settings_default_model_values():
-    """Verify Settings defaults for active_model and fallback_model per plan.md §0 & §9."""
-    settings = Settings()
-    assert settings.active_model == "gemini-3.5-flash-lite"
-    assert settings.fallback_model == "gemini-3.1-flash-lite"
+    """Verify Settings defaults for active_model and fallback_model."""
+    settings = Settings(_env_file=None)
+    assert settings.active_model == "google/gemini-3.5-flash-lite"
+    assert settings.fallback_model == "google/gemini-3.1-flash-lite"
     assert settings.llm_backend == "fake"
     assert settings.gcp_project == ""
     assert settings.gcp_location == "europe-west2"
     assert settings.llm_timeout_s == 20.0
+
+
+def test_fake_llm_client_recognizes_prefixed_and_unprefixed_models():
+    """Verify FakeLLMClient accepts google/ prefixed and unprefixed flash-lite models."""
+    client = FakeLLMClient()
+    models = [
+        "google/gemini-3.5-flash-lite",
+        "google/gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ]
+    for model_name in models:
+        assert model_name in KNOWN_MODELS
+        res = client.generate_handover(prompt="Shift: 2026-11-14-early", model_name=model_name)
+        assert isinstance(res, ReportContent)
 
 
 def test_settings_model_env_aliases(monkeypatch):

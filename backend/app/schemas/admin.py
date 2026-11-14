@@ -5,8 +5,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-# Model names must match a non-empty character pattern and deliberately NOT an enum/allowlist
-MODEL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+# Model names must match a non-empty character pattern (allowing alphanumeric, dot, underscore, dash, slash)
+MODEL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._/-]+$")
 
 
 def validate_model_name_value(v: object, field_name: str) -> str:

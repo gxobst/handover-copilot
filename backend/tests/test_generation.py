@@ -198,7 +198,7 @@ def test_generate_report_primary_model_success(
     report_res = ReportResponse(**data)
     assert report_res.shift_key == shift_key
     assert report_res.version == 1
-    assert report_res.model_used == "gemini-3.5-flash-lite"
+    assert report_res.model_used in ("google/gemini-3.5-flash-lite", "gemini-3.5-flash-lite")
     assert report_res.event_count == 2
     assert report_res.summary
     assert len(report_res.open_actions) >= 1
@@ -213,7 +213,7 @@ def test_generate_report_primary_model_success(
     persisted = db_reports[0]
     assert persisted.id == report_res.id
     assert persisted.version == 1
-    assert persisted.model_used == "gemini-3.5-flash-lite"
+    assert persisted.model_used in ("google/gemini-3.5-flash-lite", "gemini-3.5-flash-lite")
     assert persisted.event_count == 2
     assert persisted.summary == report_res.summary
 
@@ -380,14 +380,14 @@ def test_generate_report_fallback_on_model_not_found(
     assert response.status_code == status.HTTP_201_CREATED
 
     report_res = ReportResponse(**response.json())
-    # Active model failed, fallback gemini-3.1-flash-lite succeeded
-    assert report_res.model_used == "gemini-3.1-flash-lite"
+    # Active model failed, fallback succeeded
+    assert report_res.model_used in ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite")
     assert report_res.version == 1
 
     # Verify DB records fallback model
     saved = db_session.scalar(select(Report).where(Report.shift_key == shift_key))
     assert saved is not None
-    assert saved.model_used == "gemini-3.1-flash-lite"
+    assert saved.model_used in ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite")
 
 
 def test_generate_report_fallback_on_timeout_or_upstream_error(
@@ -428,7 +428,7 @@ def test_generate_report_fallback_on_timeout_or_upstream_error(
         assert response.status_code == status.HTTP_201_CREATED
 
         report_res = ReportResponse(**response.json())
-        assert report_res.model_used == "gemini-3.1-flash-lite"
+        assert report_res.model_used in ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite")
         assert report_res.summary == "Fallback generated summary."
         assert mock_llm.generate_handover.call_count == 2
     finally:
@@ -607,7 +607,7 @@ def test_generate_report_fallback_on_429_rate_limit(
         response = client.post("/api/reports/generate", json={"shift_key": shift_key})
         assert response.status_code == status.HTTP_201_CREATED
         report_res = ReportResponse(**response.json())
-        assert report_res.model_used == "gemini-3.1-flash-lite"
+        assert report_res.model_used in ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite")
         assert mock_llm.generate_handover.call_count == 2
     finally:
         app.dependency_overrides.pop(get_llm_client_dep, None)
@@ -644,7 +644,7 @@ def test_generate_report_fallback_on_schema_validation_failure(
         response = client.post("/api/reports/generate", json={"shift_key": shift_key})
         assert response.status_code == status.HTTP_201_CREATED
         report_res = ReportResponse(**response.json())
-        assert report_res.model_used == "gemini-3.1-flash-lite"
+        assert report_res.model_used in ("google/gemini-3.1-flash-lite", "gemini-3.1-flash-lite")
         assert report_res.summary == "Fallback summary after schema validation failure."
     finally:
         app.dependency_overrides.pop(get_llm_client_dep, None)

@@ -95,8 +95,8 @@ def test_settings() -> Settings:
     """Provide default Settings instance with standard admin token and models."""
     return Settings(
         admin_token=DEFAULT_ADMIN_TOKEN,
-        active_model="gemini-3.5-flash-lite",
-        fallback_model="gemini-3.1-flash-lite",
+        active_model="google/gemini-3.5-flash-lite",
+        fallback_model="google/gemini-3.1-flash-lite",
     )
 
 
@@ -206,12 +206,12 @@ def test_get_settings_default_values(client: TestClient) -> None:
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data == {
-        "active_model": "gemini-3.5-flash-lite",
-        "fallback_model": "gemini-3.1-flash-lite",
+        "active_model": "google/gemini-3.5-flash-lite",
+        "fallback_model": "google/gemini-3.1-flash-lite",
     }
     validated = AdminSettingsResponse.model_validate(data)
-    assert validated.active_model == "gemini-3.5-flash-lite"
-    assert validated.fallback_model == "gemini-3.1-flash-lite"
+    assert validated.active_model == "google/gemini-3.5-flash-lite"
+    assert validated.fallback_model == "google/gemini-3.1-flash-lite"
 
 
 def test_get_settings_reads_from_database(client: TestClient, db_session: Session) -> None:
@@ -343,7 +343,7 @@ def test_put_settings_update_active_model_only(client: TestClient, db_session: S
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
         "active_model": "gemini-3.5-flash",
-        "fallback_model": "gemini-3.1-flash-lite",
+        "fallback_model": "google/gemini-3.1-flash-lite",
     }
 
     # Verify persistence in DB
@@ -361,7 +361,7 @@ def test_put_settings_update_fallback_model_only(client: TestClient, db_session:
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
-        "active_model": "gemini-3.5-flash-lite",
+        "active_model": "google/gemini-3.5-flash-lite",
         "fallback_model": "gemini-3.5-flash",
     }
 
@@ -423,7 +423,7 @@ def test_immediate_read_after_write(client: TestClient) -> None:
     """AC-10: Changes via PUT /api/admin/settings are immediately reflected on next GET."""
     # Initial state
     get1 = client.get("/api/admin/settings", headers=AUTH_HEADER)
-    assert get1.json()["active_model"] == "gemini-3.5-flash-lite"
+    assert get1.json()["active_model"] == "google/gemini-3.5-flash-lite"
 
     # Update active_model
     put_res = client.put(
@@ -437,7 +437,7 @@ def test_immediate_read_after_write(client: TestClient) -> None:
     get2 = client.get("/api/admin/settings", headers=AUTH_HEADER)
     assert get2.status_code == status.HTTP_200_OK
     assert get2.json()["active_model"] == "gemini-2.5-flash-lite"
-    assert get2.json()["fallback_model"] == "gemini-3.1-flash-lite"
+    assert get2.json()["fallback_model"] == "google/gemini-3.1-flash-lite"
 
     # Update fallback_model
     put_res2 = client.put(
@@ -494,7 +494,7 @@ def test_report_generation_honors_dynamic_admin_updates_immediately(
     assert gen_res1.status_code == status.HTTP_201_CREATED
     report1 = gen_res1.json()
     assert report1["version"] == 1
-    assert report1["model_used"] == "gemini-3.5-flash-lite"
+    assert report1["model_used"] == "google/gemini-3.5-flash-lite"
 
     # Step 3: Admin reconfigures active_model to retired model gemini-2.5-flash-lite
     admin_put = client.put(
@@ -505,12 +505,12 @@ def test_report_generation_honors_dynamic_admin_updates_immediately(
     assert admin_put.status_code == status.HTTP_200_OK
     assert admin_put.json()["active_model"] == "gemini-2.5-flash-lite"
 
-    # Step 4: Next report generation immediately uses new setting -> fallback to gemini-3.1-flash-lite
+    # Step 4: Next report generation immediately uses new setting -> fallback to google/gemini-3.1-flash-lite
     gen_res2 = client.post("/api/reports/generate", json={"shift_key": shift_key})
     assert gen_res2.status_code == status.HTTP_201_CREATED
     report2 = gen_res2.json()
     assert report2["version"] == 2
-    assert report2["model_used"] == "gemini-3.1-flash-lite"
+    assert report2["model_used"] == "google/gemini-3.1-flash-lite"
 
     # Step 5: Admin restores active_model to another supported model gemini-3.5-flash
     admin_put2 = client.put(
@@ -538,8 +538,8 @@ def test_settings_store_unit_crud(db_session: Session, test_settings: Settings) 
     """Direct unit test of get_admin_settings and update_admin_settings."""
     # Initial read falls back to test_settings
     initial = get_admin_settings(db=db_session, settings=test_settings)
-    assert initial.active_model == "gemini-3.5-flash-lite"
-    assert initial.fallback_model == "gemini-3.1-flash-lite"
+    assert initial.active_model == "google/gemini-3.5-flash-lite"
+    assert initial.fallback_model == "google/gemini-3.1-flash-lite"
 
     # Update active model
     up1 = update_admin_settings(
@@ -548,7 +548,7 @@ def test_settings_store_unit_crud(db_session: Session, test_settings: Settings) 
         settings=test_settings,
     )
     assert up1.active_model == "gemini-4-argon"
-    assert up1.fallback_model == "gemini-3.1-flash-lite"
+    assert up1.fallback_model == "google/gemini-3.1-flash-lite"
 
     # Update fallback model
     up2 = update_admin_settings(
@@ -603,6 +603,7 @@ def test_model_name_pattern_regex() -> None:
     """Verify MODEL_NAME_PATTERN allows alphanumeric, dot, underscore, and dash."""
     valid = [
         "gemini-3.5-flash-lite",
+        "google/gemini-3.5-flash-lite",
         "gemini-2.5-flash-lite",
         "gemini-4-argon",
         "model.name_123-v1",
@@ -614,7 +615,6 @@ def test_model_name_pattern_regex() -> None:
     invalid = [
         "",
         "model name",
-        "model/v1",
         "model:1",
         "model@org",
     ]
