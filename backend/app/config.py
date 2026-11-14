@@ -63,6 +63,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ADMIN_TOKEN", "admin_token"),
         description="Admin token for bearer authentication against admin API",
     )
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "otel_exporter_otlp_endpoint",
+        ),
+        description="OTLP exporter endpoint URL",
+    )
+    otel_exporter_otlp_headers: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "otel_exporter_otlp_headers",
+        ),
+        description="OTLP exporter headers (comma-separated key=value)",
+    )
 
     @property
     def app_env(self) -> str:

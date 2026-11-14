@@ -4,8 +4,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from app.config import Settings, get_settings
 from app.db.repo import EventRepository, get_event_repository
 from app.schemas.events import SHIFT_KEY_REGEX, EventCreate, EventResponse
+from app.telemetry import get_logger, record_event_created
 
 router = APIRouter(prefix="/api", tags=["events"])
 
@@ -20,9 +22,24 @@ router = APIRouter(prefix="/api", tags=["events"])
 def create_event(
     event_in: EventCreate,
     repo: EventRepository = Depends(get_event_repository),
+    settings: Settings = Depends(get_settings),
 ) -> EventResponse:
     """Create a new event associated with a shift_key."""
-    return repo.create(event_in)
+    created = repo.create(event_in)
+    record_event_created(env=settings.environment, version=settings.version)
+    logger = get_logger("events")
+    category_str = (
+        created.category.value
+        if hasattr(created.category, "value")
+        else str(created.category)
+    )
+    logger.info(
+        "Shift event created",
+        shift_key=created.shift_key,
+        category=category_str,
+        event_id=str(created.id),
+    )
+    return created
 
 
 @router.get(

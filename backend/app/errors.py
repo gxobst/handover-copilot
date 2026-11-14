@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.schemas.errors import ProblemDetails
+from app.telemetry import get_current_trace_id
 
 
 def format_validation_error_detail(exc: RequestValidationError) -> str:
@@ -31,7 +32,11 @@ async def request_validation_exception_handler(
 
     Returns RFC 9457 ProblemDetails with HTTP 422 and application/problem+json media type.
     """
-    trace_id = getattr(request.state, "trace_id", None) or request.headers.get("x-trace-id")
+    trace_id = (
+        getattr(request.state, "trace_id", None)
+        or request.headers.get("x-trace-id")
+        or get_current_trace_id()
+    )
     detail = format_validation_error_detail(exc)
 
     problem = ProblemDetails(
@@ -41,10 +46,12 @@ async def request_validation_exception_handler(
         detail=detail,
         trace_id=trace_id,
     )
+    headers = {"X-Trace-ID": trace_id} if trace_id else {}
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=problem.model_dump(),
         media_type="application/problem+json",
+        headers=headers,
     )
 
 
@@ -93,7 +100,11 @@ async def http_exception_handler(
             title = "HTTP Error"
 
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-    trace_id = getattr(request.state, "trace_id", None) or request.headers.get("x-trace-id")
+    trace_id = (
+        getattr(request.state, "trace_id", None)
+        or request.headers.get("x-trace-id")
+        or get_current_trace_id()
+    )
 
     problem = ProblemDetails(
         type="about:blank",
@@ -102,7 +113,9 @@ async def http_exception_handler(
         detail=detail,
         trace_id=trace_id,
     )
-    headers = getattr(exc, "headers", None) or {}
+    headers = dict(getattr(exc, "headers", None) or {})
+    if trace_id:
+        headers["X-Trace-ID"] = trace_id
     return JSONResponse(
         status_code=exc.status_code,
         content=problem.model_dump(),
