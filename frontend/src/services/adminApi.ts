@@ -3,8 +3,9 @@ import type {
   AdminSettingsResponse,
   AdminSettingsUpdate,
 } from '../types/api.ts';
+import type { AdminService } from './types.ts';
 
-export const adminApi = {
+export const adminApi: AdminService = {
   /**
    * Retrieves active and fallback model routing configurations.
    * Requires Bearer token authentication.
@@ -34,4 +35,5 @@ export const adminApi = {
   },
 };
 
+export const realAdminApi = adminApi;
 export default adminApi;

@@ -4,8 +4,9 @@ import type {
   EventResponse,
   ShiftKey,
 } from '../types/api.ts';
+import type { EventsService } from './types.ts';
 
-export const eventsApi = {
+export const eventsApi: EventsService = {
   /**
    * Records a new operational shift event.
    * POST /api/events
@@ -37,4 +38,5 @@ export const eventsApi = {
   },
 };
 
+export const realEventsApi = eventsApi;
 export default eventsApi;
