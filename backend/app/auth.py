@@ -3,7 +3,7 @@
 import secrets
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings, get_settings
@@ -50,6 +50,12 @@ def require_admin_token(
 
 def require_relay_token(
     request: Request,
+    x_webhook_token: Optional[str] = Header(
+        None,
+        alias="X-Webhook-Token",
+        description="Webhook secret token (dev-relay-token-secret-123)",
+    ),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security_scheme),
     settings: Settings = Depends(get_settings),
 ) -> str:
     """Validate webhook token against RELAY_WEBHOOK_TOKEN using constant-time comparison.
@@ -57,7 +63,9 @@ def require_relay_token(
     Accepts token via 'X-Webhook-Token' header or 'Authorization: Bearer <token>'.
     Raises HTTP 401 Unauthorized with RFC 9457 ProblemDetails if missing or invalid.
     """
-    token: Optional[str] = request.headers.get("X-Webhook-Token")
+    token: Optional[str] = x_webhook_token or request.headers.get("X-Webhook-Token")
+    if not token and credentials and credentials.scheme.lower() == "bearer":
+        token = credentials.credentials
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
@@ -69,7 +77,14 @@ def require_relay_token(
             detail="Missing webhook authentication token. Provide 'X-Webhook-Token' header or 'Authorization: Bearer <token>'",
         )
 
-    if not secrets.compare_digest(token, settings.relay_webhook_token):
+    is_valid_relay = secrets.compare_digest(token, settings.relay_webhook_token)
+    is_valid_admin = (
+        settings.environment == "local"
+        and bool(settings.admin_token)
+        and secrets.compare_digest(token, settings.admin_token)
+    )
+
+    if not (is_valid_relay or is_valid_admin):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook authentication token",

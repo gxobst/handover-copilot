@@ -118,7 +118,7 @@ def client() -> TestClient:
 
 def test_relay_settings_defaults_and_aliases() -> None:
     """Settings model includes relay configuration fields with correct defaults and aliases."""
-    settings = Settings()
+    settings = Settings(_env_file=None)
     assert settings.relay_webhook_token == "dev-relay-token-secret-123"
     assert settings.github_dispatch_pat == ""
     assert settings.github_repository == "gxobst/handover-copilot"

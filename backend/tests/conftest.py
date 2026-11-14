@@ -1,12 +1,18 @@
 """Global pytest configuration and session fixtures."""
 
+import os
 from pathlib import Path
+
+# Enforce offline fake LLM client for automated tests
+os.environ["LLM_BACKEND"] = "fake"
 
 from alembic import command
 from alembic.config import Config
 import pytest
 
 from app.config import get_settings
+
+get_settings.cache_clear()
 
 
 @pytest.fixture(scope="session", autouse=True)

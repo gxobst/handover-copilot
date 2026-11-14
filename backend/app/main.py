@@ -2,14 +2,25 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.config import get_settings
 from app.errors import http_exception_handler, request_validation_exception_handler
 from app.routers import admin, events, health, relay, reports
-from app.telemetry import TelemetryMiddleware, init_telemetry
+from app.telemetry import TelemetryMiddleware, get_logger, init_telemetry
 
 
 def create_app() -> FastAPI:
     """Application factory for Shift Handover Copilot backend."""
     init_telemetry()
+
+    settings = get_settings()
+    logger = get_logger("startup")
+    logger.info(
+        "app_startup",
+        llm_backend=settings.llm_backend,
+        gcp_location=settings.gcp_location,
+        active_model=settings.active_model,
+        fallback_model=settings.fallback_model,
+    )
 
     app = FastAPI(
         title="Shift Handover Copilot API",
