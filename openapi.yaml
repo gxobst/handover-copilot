@@ -1,0 +1,1011 @@
+openapi: 3.1.0
+info:
+  title: Shift Handover Copilot API
+  version: 0.1.0
+  description: >
+    Production-grade API for manufacturing shift event logging, AI-powered handover
+    report generation with automatic model fallback, and automated incident alert relaying.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://handover-copilot-dev-544485579979.europe-west2.run.app
+    description: Cloud Run development deployment
+  - url: http://127.0.0.1:8000
+    description: Local development server
+tags:
+  - name: Health
+    description: System liveness and runtime diagnostics
+  - name: Events
+    description: Structured shift event logging across downtime, safety, quality, and info
+  - name: Reports
+    description: AI-assisted handover report generation, versioning, and historical snapshots
+  - name: Admin
+    description: Dynamic runtime configuration and LLM model routing
+  - name: Relay
+    description: Grafana alert ingestion and GitHub Actions incident response dispatching
+
+paths:
+  /v1/healthz:
+    get:
+      operationId: getHealthStatus
+      summary: Liveness health check
+      description: Returns service operational status without touching the database or external APIs (AC-9).
+      tags:
+        - Health
+      security: []
+      x-source: "backend/app/routers/health.py:health_check"
+      responses:
+        '200':
+          description: Service is healthy and operational.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  value:
+                    status: ok
+                    version: 0.1.0
+                    environment: local
+        '400':
+          description: Malformed request parameters.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/events:
+    post:
+      operationId: createEvent
+      summary: Record a new shift event
+      description: Logs an operational event (downtime, safety, quality, info) for a specific shift window.
+      tags:
+        - Events
+      security: []
+      x-source: "backend/app/routers/events.py:create_event"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventCreateRequest'
+            examples:
+              downtimeEvent:
+                summary: Hydraulic pressure drop
+                value:
+                  shiftKey: "2026-11-14-early"
+                  machine: "Press-01"
+                  category: "downtime"
+                  note: "Hydraulic pressure dropped suddenly, main stamping line stopped for 45 minutes."
+              safetyEvent:
+                summary: Spill incident
+                value:
+                  shiftKey: "2026-11-14-early"
+                  machine: "Conveyor-B"
+                  category: "safety"
+                  note: "Oil spill observed near emergency stop lever, area cordoned off with warning cones."
+      responses:
+        '201':
+          description: Event successfully recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+              examples:
+                created:
+                  value:
+                    id: "41f34ec4-f489-4362-869d-9555cd9c0f98"
+                    shiftKey: "2026-11-14-early"
+                    machine: "Press-01"
+                    category: "downtime"
+                    note: "Hydraulic pressure dropped suddenly, main stamping line stopped for 45 minutes."
+                    createdAt: "2026-11-14T06:45:00Z"
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      operationId: listEvents
+      summary: List events for a shift
+      description: Retrieves all logged events for a given shift key, sorted chronologically ascending.
+      tags:
+        - Events
+      security: []
+      x-source: "backend/app/routers/events.py:list_events"
+      parameters:
+        - $ref: '#/components/parameters/ShiftKeyQuery'
+      responses:
+        '200':
+          description: Chronological list of events for the shift.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventResponse'
+              examples:
+                shiftEvents:
+                  value:
+                    - id: "41f34ec4-f489-4362-869d-9555cd9c0f98"
+                      shiftKey: "2026-11-14-early"
+                      machine: "Press-01"
+                      category: "downtime"
+                      note: "Hydraulic pressure dropped suddenly, main stamping line stopped for 45 minutes."
+                      createdAt: "2026-11-14T06:45:00Z"
+                    - id: "26a57018-66f9-417e-82e4-e5cc6df054bf"
+                      shiftKey: "2026-11-14-early"
+                      machine: "Conveyor-B"
+                      category: "safety"
+                      note: "Oil spill observed near emergency stop lever, area cordoned off with warning cones."
+                      createdAt: "2026-11-14T07:10:00Z"
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/events/{id}:
+    delete:
+      operationId: deleteEvent
+      summary: Delete an event
+      description: Permanently deletes an event by its unique UUID.
+      tags:
+        - Events
+      security: []
+      x-source: "backend/app/routers/events.py:delete_event"
+      parameters:
+        - $ref: '#/components/parameters/IdPathParam'
+      responses:
+        '204':
+          description: Event permanently deleted.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/reports/generate:
+    post:
+      operationId: generateReport
+      summary: Generate shift handover report
+      description: >
+        Invokes Gemini LLM with structured outputs to summarize shift events, highlight safety
+        critical items (AC-4), extract actionable next steps, and persist an immutable report snapshot.
+        Automatically retries on fallback model upon primary model error.
+      tags:
+        - Reports
+      security: []
+      x-source: "backend/app/routers/reports.py:generate_report_endpoint"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportGenerateRequest'
+            examples:
+              generateEarly:
+                value:
+                  shiftKey: "2026-11-14-early"
+      responses:
+        '201':
+          description: Handover report successfully generated and saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+              examples:
+                reportV1:
+                  value:
+                    id: "2cff7f41-1053-4548-a6f5-153fc558a04d"
+                    shiftKey: "2026-11-14-early"
+                    version: 1
+                    summary: "An oil spill was observed near Conveyor-B emergency stop lever. Press-01 experienced a 45-minute outage due to sudden hydraulic pressure loss."
+                    openActions:
+                      - action: "Clean up oil spill near Conveyor-B emergency stop lever."
+                        owner: "Shift lead"
+                        priority: "high"
+                      - action: "Investigate and resolve hydraulic pressure drop on Press-01."
+                        owner: "Shift lead"
+                        priority: "medium"
+                    safetyNotes:
+                      - "Oil spill observed near Conveyor-B emergency stop lever; area cordoned off with warning cones."
+                    modelUsed: "google/gemini-3.5-flash-lite"
+                    eventCount: 2
+                    createdAt: "2026-11-14T14:00:00Z"
+        '422':
+          description: Validation error or zero events found for the shift.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                zeroEvents:
+                  value:
+                    type: "about:blank"
+                    title: "Unprocessable Entity"
+                    status: 422
+                    detail: "No events found for shift"
+                    traceId: "7fdc110b37068e034adf6839ef6204a2"
+        '502':
+          description: LLM generation failed across primary and fallback models.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                llmFailed:
+                  value:
+                    type: "about:blank"
+                    title: "Generation Failed"
+                    status: 502
+                    detail: "All model attempts failed: Model 'gemini-nonexistent' not found"
+                    traceId: "cd787735899ee486fc3f36a6a7e7eb8d"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/reports:
+    get:
+      operationId: listReports
+      summary: List handover report summaries
+      description: Returns lightweight summaries of historical reports, optionally filtered by shift key.
+      tags:
+        - Reports
+      security: []
+      x-source: "backend/app/routers/reports.py:list_reports"
+      parameters:
+        - name: shiftKey
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          description: Optional shift identifier filter
+          x-renamed-from: shift_key
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Maximum number of records to return
+      responses:
+        '200':
+          description: List of historical report summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportSummary'
+              examples:
+                summaries:
+                  value:
+                    - id: "2cff7f41-1053-4548-a6f5-153fc558a04d"
+                      shiftKey: "2026-11-14-early"
+                      version: 1
+                      modelUsed: "google/gemini-3.5-flash-lite"
+                      eventCount: 2
+                      createdAt: "2026-11-14T14:00:00Z"
+                    - id: "247f3299-3290-4016-a98c-2107840ad42d"
+                      shiftKey: "2026-11-14-early"
+                      version: 2
+                      modelUsed: "google/gemini-3.5-flash-lite"
+                      eventCount: 3
+                      createdAt: "2026-11-14T14:15:00Z"
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/reports/{id}:
+    get:
+      operationId: getReportDetail
+      summary: Get handover report detail
+      description: Retrieves the complete immutable snapshot of a handover report by ID.
+      tags:
+        - Reports
+      security: []
+      x-source: "backend/app/routers/reports.py:get_report_detail"
+      parameters:
+        - $ref: '#/components/parameters/IdPathParam'
+      responses:
+        '200':
+          description: Complete immutable handover report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+              examples:
+                reportDetail:
+                  value:
+                    id: "2cff7f41-1053-4548-a6f5-153fc558a04d"
+                    shiftKey: "2026-11-14-early"
+                    version: 1
+                    summary: "An oil spill was observed near Conveyor-B emergency stop lever. Press-01 experienced a 45-minute outage due to sudden hydraulic pressure loss."
+                    openActions:
+                      - action: "Clean up oil spill near Conveyor-B emergency stop lever."
+                        owner: "Shift lead"
+                        priority: "high"
+                      - action: "Investigate and resolve hydraulic pressure drop on Press-01."
+                        owner: "Shift lead"
+                        priority: "medium"
+                    safetyNotes:
+                      - "Oil spill observed near Conveyor-B emergency stop lever; area cordoned off with warning cones."
+                    modelUsed: "google/gemini-3.5-flash-lite"
+                    eventCount: 2
+                    createdAt: "2026-11-14T14:00:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/settings:
+    get:
+      operationId: getAdminSettings
+      summary: Get active and fallback models
+      description: Returns the currently configured primary and fallback LLM models.
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      x-source: "backend/app/routers/admin.py:get_settings_endpoint"
+      responses:
+        '200':
+          description: Active model routing settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSettingsResponse'
+              examples:
+                current:
+                  value:
+                    activeModel: "google/gemini-3.5-flash-lite"
+                    fallbackModel: "google/gemini-3.1-flash-lite"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      operationId: updateAdminSettings
+      summary: Update active and fallback models
+      description: >
+        Dynamically reconfigures the active and/or fallback Gemini model names at runtime
+        without requiring a service restart.
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      x-source: "backend/app/routers/admin.py:update_settings_endpoint"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSettingsUpdate'
+            examples:
+              updateActive:
+                summary: Failover to fallback
+                value:
+                  activeModel: "google/gemini-3.1-flash-lite"
+                  fallbackModel: "google/gemini-3.5-flash-lite"
+      responses:
+        '200':
+          description: Successfully updated model routing settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSettingsResponse'
+              examples:
+                updated:
+                  value:
+                    activeModel: "google/gemini-3.1-flash-lite"
+                    fallbackModel: "google/gemini-3.5-flash-lite"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/relay/webhook:
+    post:
+      operationId: relayGrafanaWebhook
+      summary: Ingest Grafana alert and trigger GitHub workflow
+      description: >
+        Receives webhook notifications from Grafana Cloud Alertmanager, validates secret token,
+        enforces deduplication cooldown window, and triggers the GitHub Actions incident responder workflow.
+      tags:
+        - Relay
+      security:
+        - WebhookTokenHeader: []
+        - BearerAuth: []
+      x-source: "backend/app/routers/relay.py:relay_webhook"
+      parameters:
+        - name: X-Webhook-Token
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Shared secret token (alternatively provide as Authorization Bearer token)
+          example: "dev-relay-token-secret-123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrafanaAlertPayload'
+            examples:
+              firingAlert:
+                value:
+                  receiver: "handover-relay"
+                  status: "firing"
+                  alerts:
+                    - status: "firing"
+                      labels:
+                        alertname: "HandoverGenerationFailureRateHigh"
+                        environment: "prod"
+                        severity: "critical"
+                      annotations:
+                        dashboardURL: "https://grafana.example.com/d/handover"
+                        runbookURL: "https://github.com/gxobst/handover-copilot/blob/main/_docs/runbook.md"
+                      fingerprint: "alert-fp-live-001"
+      responses:
+        '200':
+          description: Alert successfully processed (dispatched or deduplicated).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayResponse'
+              examples:
+                dispatched:
+                  summary: First alert firing
+                  value:
+                    status: "dispatched"
+                    eventType: "grafana-alert"
+                    fingerprint: "alert-fp-live-001"
+                deduplicated:
+                  summary: Repeated alert within cooldown
+                  value:
+                    status: "deduplicated"
+                    eventType: "grafana-alert"
+                    fingerprint: "alert-fp-live-001"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          description: Upstream GitHub repository dispatch failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                upstreamFailure:
+                  value:
+                    type: "about:blank"
+                    title: "Bad Gateway"
+                    status: 502
+                    detail: "GitHub repository_dispatch upstream failed with HTTP 401"
+                    traceId: "22d575bcafc6000ea163d7f686d72480"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token for administrative API endpoints (ADMIN_TOKEN).
+    WebhookTokenHeader:
+      type: apiKey
+      in: header
+      name: X-Webhook-Token
+      description: Secret shared token for Grafana alert webhooks (RELAY_WEBHOOK_TOKEN).
+
+  parameters:
+    ShiftKeyQuery:
+      name: shiftKey
+      in: query
+      required: true
+      schema:
+        type: string
+        pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+      description: Shift identifier in YYYY-MM-DD-(early|late|night) format.
+      example: "2026-11-14-early"
+      x-renamed-from: shift_key
+
+    IdPathParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Unique resource UUID identifier.
+      example: "41f34ec4-f489-4362-869d-9555cd9c0f98"
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or expired authentication token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          examples:
+            unauthorized:
+              value:
+                type: "about:blank"
+                title: "Unauthorized"
+                status: 401
+                detail: "Invalid or missing bearer token"
+                traceId: "a1b2c3d4e5f6789012345678abcdef01"
+
+    NotFound:
+      description: Requested resource was not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          examples:
+            notFound:
+              value:
+                type: "about:blank"
+                title: "Not Found"
+                status: 404
+                detail: "Resource not found"
+                traceId: "a1b2c3d4e5f6789012345678abcdef02"
+
+    UnprocessableEntity:
+      description: Schema validation failed or malformed request payload.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          examples:
+            validationError:
+              value:
+                type: "about:blank"
+                title: "Validation Error"
+                status: 422
+                detail: "Input should be 'downtime', 'quality', 'safety' or 'info' (category)"
+                traceId: "a1b2c3d4e5f6789012345678abcdef03"
+
+    InternalServerError:
+      description: Unexpected internal server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          examples:
+            internalError:
+              value:
+                type: "about:blank"
+                title: "Internal Server Error"
+                status: 500
+                detail: "An unexpected error occurred while processing the request."
+                traceId: "a1b2c3d4e5f6789012345678abcdef04"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - version
+        - environment
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "0.1.0"
+        environment:
+          type: string
+          example: "local"
+      x-source: "backend/app/routers/health.py:HealthResponse"
+
+    Category:
+      type: string
+      enum:
+        - downtime
+        - quality
+        - safety
+        - info
+      description: Category classifying the operational shift event.
+      x-source: "backend/app/schemas/events.py:Category"
+
+    EventCreateRequest:
+      type: object
+      required:
+        - shiftKey
+        - machine
+        - category
+        - note
+      properties:
+        shiftKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          description: Shift identifier in YYYY-MM-DD-(early|late|night) format.
+          example: "2026-11-14-early"
+          x-renamed-from: shift_key
+        machine:
+          type: string
+          minLength: 1
+          description: Machine or station identifier.
+          example: "Press-01"
+        category:
+          $ref: '#/components/schemas/Category'
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Description of the incident or observation.
+          example: "Hydraulic pressure dropped suddenly, main stamping line stopped for 45 minutes."
+      x-source: "backend/app/schemas/events.py:EventCreate"
+
+    EventResponse:
+      type: object
+      required:
+        - id
+        - shiftKey
+        - machine
+        - category
+        - note
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique event identifier.
+          example: "41f34ec4-f489-4362-869d-9555cd9c0f98"
+        shiftKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          example: "2026-11-14-early"
+          x-renamed-from: shift_key
+        machine:
+          type: string
+          example: "Press-01"
+        category:
+          $ref: '#/components/schemas/Category'
+        note:
+          type: string
+          example: "Hydraulic pressure dropped suddenly, main stamping line stopped for 45 minutes."
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when the event was recorded (UTC).
+          example: "2026-11-14T06:45:00Z"
+          x-renamed-from: created_at
+      x-source: "backend/app/schemas/events.py:EventResponse"
+
+    ActionPriority:
+      type: string
+      enum:
+        - high
+        - medium
+        - low
+      description: Priority level for handover action items.
+      x-source: "backend/app/schemas/reports.py:ActionPriority"
+
+    OpenAction:
+      type: object
+      required:
+        - action
+        - owner
+        - priority
+      properties:
+        action:
+          type: string
+          minLength: 1
+          description: Specific follow-up task description.
+          example: "Clean up oil spill near Conveyor-B emergency stop lever."
+        owner:
+          type: string
+          minLength: 1
+          description: Assigned role or individual responsible for completing the action.
+          example: "Shift lead"
+          x-tentative: true
+        priority:
+          $ref: '#/components/schemas/ActionPriority'
+      x-source: "backend/app/schemas/reports.py:OpenAction"
+
+    ReportGenerateRequest:
+      type: object
+      required:
+        - shiftKey
+      properties:
+        shiftKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          description: Shift identifier to generate report for.
+          example: "2026-11-14-early"
+          x-renamed-from: shift_key
+      x-source: "backend/app/schemas/reports.py:ReportGenerateRequest"
+
+    ReportSummary:
+      type: object
+      required:
+        - id
+        - shiftKey
+        - version
+        - modelUsed
+        - eventCount
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "2cff7f41-1053-4548-a6f5-153fc558a04d"
+        shiftKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          example: "2026-11-14-early"
+          x-renamed-from: shift_key
+        version:
+          type: integer
+          minimum: 1
+          description: Monotonically increasing report version for the shift.
+          example: 1
+        modelUsed:
+          type: string
+          description: Gemini model identifier used for report generation.
+          example: "google/gemini-3.5-flash-lite"
+          x-renamed-from: model_used
+        eventCount:
+          type: integer
+          minimum: 0
+          description: Number of events synthesized in this report.
+          example: 2
+          x-renamed-from: event_count
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-14T14:00:00Z"
+          x-renamed-from: created_at
+      x-source: "backend/app/schemas/reports.py:ReportSummary"
+
+    ReportResponse:
+      type: object
+      required:
+        - id
+        - shiftKey
+        - version
+        - summary
+        - openActions
+        - safetyNotes
+        - modelUsed
+        - eventCount
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "2cff7f41-1053-4548-a6f5-153fc558a04d"
+        shiftKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}-(early|late|night)$'
+          example: "2026-11-14-early"
+          x-renamed-from: shift_key
+        version:
+          type: integer
+          minimum: 1
+          example: 1
+        summary:
+          type: string
+          description: Concise executive summary synthesized from shift events (up to 5 sentences).
+          example: "An oil spill was observed near Conveyor-B emergency stop lever. Press-01 experienced a 45-minute outage due to sudden hydraulic pressure loss."
+        openActions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenAction'
+          description: High-priority follow-up items for the oncoming shift.
+          x-renamed-from: open_actions
+        safetyNotes:
+          type: array
+          items:
+            type: string
+          description: Explicit zero-omission safety observations (AC-4).
+          example:
+            - "Oil spill observed near Conveyor-B emergency stop lever; area cordoned off with warning cones."
+          x-renamed-from: safety_notes
+        modelUsed:
+          type: string
+          example: "google/gemini-3.5-flash-lite"
+          x-renamed-from: model_used
+        eventCount:
+          type: integer
+          minimum: 0
+          example: 2
+          x-renamed-from: event_count
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-14T14:00:00Z"
+          x-renamed-from: created_at
+      x-source: "backend/app/schemas/reports.py:ReportResponse"
+
+    AdminSettingsResponse:
+      type: object
+      required:
+        - activeModel
+        - fallbackModel
+      properties:
+        activeModel:
+          type: string
+          description: Active Gemini model used for handover generation.
+          example: "google/gemini-3.5-flash-lite"
+          x-renamed-from: active_model
+        fallbackModel:
+          type: string
+          description: Fallback Gemini model used if active model encounters an outage or error.
+          example: "google/gemini-3.1-flash-lite"
+          x-renamed-from: fallback_model
+      x-source: "backend/app/schemas/admin.py:AdminSettingsResponse"
+
+    AdminSettingsUpdate:
+      type: object
+      description: Update payload. At least one of activeModel or fallbackModel must be provided.
+      properties:
+        activeModel:
+          type: string
+          pattern: '^[a-zA-Z0-9._/-]+$'
+          maxLength: 128
+          description: New active model name.
+          example: "google/gemini-3.1-flash-lite"
+          x-renamed-from: active_model
+        fallbackModel:
+          type: string
+          pattern: '^[a-zA-Z0-9._/-]+$'
+          maxLength: 128
+          description: New fallback model name.
+          example: "google/gemini-3.5-flash-lite"
+          x-renamed-from: fallback_model
+      x-source: "backend/app/schemas/admin.py:AdminSettingsUpdate"
+
+    GrafanaAlertItem:
+      type: object
+      required:
+        - status
+        - fingerprint
+      properties:
+        status:
+          type: string
+          description: Alert firing status ('firing' or 'resolved').
+          example: "firing"
+        fingerprint:
+          type: string
+          description: Unique deduplication fingerprint from Alertmanager.
+          example: "alert-fp-live-001"
+        labels:
+          type: object
+          additionalProperties: true
+          description: Key-value label pairs identifying the alert.
+          example:
+            alertname: "HandoverGenerationFailureRateHigh"
+            environment: "prod"
+            severity: "critical"
+        annotations:
+          type: object
+          additionalProperties: true
+          description: Human-readable annotations and links.
+          example:
+            dashboardURL: "https://grafana.example.com/d/handover"
+            runbookURL: "https://github.com/gxobst/handover-copilot/blob/main/_docs/runbook.md"
+        dashboardURL:
+          type: string
+          description: Direct link to dashboard.
+          example: "https://grafana.example.com/d/handover"
+        generatorURL:
+          type: string
+          description: Link to the alert rule.
+        startsAt:
+          type: string
+          format: date-time
+          example: "2026-11-14T12:00:00Z"
+        endsAt:
+          type: string
+          format: date-time
+      x-source: "backend/app/schemas/relay.py:GrafanaAlertItem"
+
+    GrafanaAlertPayload:
+      type: object
+      required:
+        - status
+        - alerts
+      properties:
+        receiver:
+          type: string
+          description: Name of the notification receiver in Alertmanager.
+          example: "handover-relay"
+        status:
+          type: string
+          example: "firing"
+        alerts:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/GrafanaAlertItem'
+        commonLabels:
+          type: object
+          additionalProperties: true
+          x-tentative: true
+        commonAnnotations:
+          type: object
+          additionalProperties: true
+          x-tentative: true
+        externalURL:
+          type: string
+          x-tentative: true
+      x-source: "backend/app/schemas/relay.py:GrafanaAlertPayload"
+
+    RelayResponse:
+      type: object
+      required:
+        - status
+        - eventType
+      properties:
+        status:
+          type: string
+          enum:
+            - dispatched
+            - deduplicated
+            - ignored
+          description: Processing disposition of the incoming alert.
+          example: "dispatched"
+        eventType:
+          type: string
+          description: GitHub repository_dispatch event type.
+          example: "grafana-alert"
+          x-renamed-from: event_type
+        fingerprint:
+          type: string
+          description: Deduped alert fingerprint.
+          example: "alert-fp-live-001"
+        reason:
+          type: string
+          description: Optional diagnostic reason if ignored or skipped.
+          example: "Alert status resolved, skipping dispatch"
+          x-tentative: true
+      x-source: "backend/app/schemas/relay.py:RelayResponse"
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the problem type (RFC 9457).
+          example: "about:blank"
+        title:
+          type: string
+          description: Short human-readable summary of the problem.
+          example: "Unprocessable Entity"
+        status:
+          type: integer
+          description: HTTP status code.
+          example: 422
+        detail:
+          type: string
+          description: Specific explanation of this occurrence.
+          example: "No events found for shift"
+        traceId:
+          type: string
+          description: Distributed tracing identifier for log and trace correlation.
+          example: "7fdc110b37068e034adf6839ef6204a2"
+          x-renamed-from: trace_id
+      x-source: "backend/app/schemas/errors.py:ProblemDetails"
