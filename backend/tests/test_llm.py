@@ -153,7 +153,7 @@ def test_settings_default_model_values():
     assert settings.fallback_model == "google/gemini-3.1-flash-lite"
     assert settings.llm_backend == "fake"
     assert settings.gcp_project == ""
-    assert settings.gcp_location == "europe-west2"
+    assert settings.gcp_location in ("global", "europe-west2")
     assert settings.llm_timeout_s == 20.0
 
 

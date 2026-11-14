@@ -40,7 +40,7 @@ class VertexLLMClient:
     def __init__(
         self,
         project: str = "",
-        location: str = "europe-west2",
+        location: str = "global",
         client: Any = None,
     ) -> None:
         self.project = project

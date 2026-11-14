@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         description="Google Cloud project ID for Vertex AI",
     )
     gcp_location: str = Field(
-        default="europe-west2",
+        default="global",
         validation_alias=AliasChoices("GCP_LOCATION", "gcp_location"),
         description="Google Cloud region/location for Vertex AI",
     )

@@ -5,7 +5,7 @@ This guide provides an end-to-end walkthrough to manually test and verify the co
 > [!IMPORTANT]
 > **Real Live Services Only (No Mocks)**:
 > This entire test suite runs exclusively against **live production-grade cloud and database services**:
-> 1. **Live Google Cloud Vertex AI**: Calls the Google GenAI SDK against project `boxwood-scope-292916` in region `europe-west2` using model `gemini-3.5-flash`.
+> 1. **Live Google Cloud Vertex AI**: Calls the Google GenAI SDK against project `boxwood-scope-292916` in location `global` using model `google/gemini-3.5-flash-lite` (latency ~3.3s).
 > 2. **Live Database Persistence**: Persists all records to SQLite (`handover.db`) using SQLAlchemy ORM with foreign keys, unique constraints, and transaction rollback.
 > 3. **Live GitHub Repository Dispatch**: The incident webhook relay sends real HTTPS requests to GitHub REST API (`gxobst/handover-copilot`) using a GitHub PAT.
 > 4. **Live Incident Fallback**: Verifies live automated failover when calling an unavailable model against Vertex AI.
@@ -31,11 +31,11 @@ PORT=8000
 DATABASE_URL=sqlite:///./handover.db
 
 GCP_PROJECT=boxwood-scope-292916
-GCP_LOCATION=europe-west2
+GCP_LOCATION=global
 
 LLM_BACKEND=vertex
 LLM_TIMEOUT_S=20
-ACTIVE_MODEL=gemini-3.5-flash
+ACTIVE_MODEL=google/gemini-3.5-flash-lite
 FALLBACK_MODEL=google/gemini-3.1-flash-lite
 
 ADMIN_TOKEN=dev-admin-secret-key-12345
@@ -257,7 +257,7 @@ Open your browser to the interactive Swagger UI:
 ---
 
 ### Scenario 7: Live Handover Report Generation via Vertex AI (AC-3, AC-4)
-**Objective**: Generate an immutable shift handover report by calling **real Google Cloud Vertex AI** in `europe-west2`.
+**Objective**: Generate an immutable shift handover report by calling **real Google Cloud Vertex AI** with `google/gemini-3.5-flash-lite` in `global` location.
 
 * **Method & URL**: `POST /api/reports/generate`
 * **Request Body**:
@@ -266,7 +266,7 @@ Open your browser to the interactive Swagger UI:
     "shift_key": "2026-11-14-early"
   }
   ```
-* **Execution Time**: ~4–6 seconds (live Google Cloud API call).
+* **Execution Time**: ~3–5 seconds (live Google Cloud API call).
 * **Expected Output**:
   * **HTTP Status**: `201 Created`
   * **Live Response Body**:
@@ -291,13 +291,13 @@ Open your browser to the interactive Swagger UI:
       "safety_notes": [
         "Oil spill observed near Conveyor-B emergency stop lever; area cordoned off with warning cones."
       ],
-      "model_used": "gemini-3.5-flash",
+      "model_used": "google/gemini-3.5-flash-lite",
       "event_count": 2,
       "created_at": "2026-11-14T..."
     }
     ```
   * **Live Verification Checks**:
-    - [x] `"model_used": "gemini-3.5-flash"` indicates live Vertex AI generation.
+    - [x] `"model_used": "google/gemini-3.5-flash-lite"` indicates live Vertex AI generation.
     - [x] `"version": 1` on initial shift report.
     - [x] Safety note specifically preserves the Conveyor-B oil spill (AC-4 zero-omission safety rule).
     - [x] Open actions are assigned structured priority (`high`, `medium`, `low`) and ownership.
@@ -405,7 +405,7 @@ Open your browser to the interactive Swagger UI:
   * **Response Body**:
     ```json
     {
-      "active_model": "gemini-3.5-flash",
+      "active_model": "google/gemini-3.5-flash-lite",
       "fallback_model": "google/gemini-3.1-flash-lite"
     }
     ```
@@ -420,8 +420,8 @@ Open your browser to the interactive Swagger UI:
 * **Request Body**:
   ```json
   {
-    "active_model": "gemini-3.5-flash",
-    "fallback_model": "gemini-3.5-flash"
+    "active_model": "google/gemini-3.1-flash-lite",
+    "fallback_model": "google/gemini-3.5-flash-lite"
   }
   ```
 * **Expected Output**:
@@ -429,8 +429,8 @@ Open your browser to the interactive Swagger UI:
   * **Response Body**:
     ```json
     {
-      "active_model": "gemini-3.5-flash",
-      "fallback_model": "gemini-3.5-flash"
+      "active_model": "google/gemini-3.1-flash-lite",
+      "fallback_model": "google/gemini-3.5-flash-lite"
     }
     ```
 * Call `GET /api/admin/settings` to verify the settings updated in memory immediately.
@@ -442,11 +442,11 @@ Open your browser to the interactive Swagger UI:
 
 #### Step 1: Inject Outage via Admin API
 * **Method & URL**: `PUT /api/admin/settings`
-* Set `active_model` to `google/gemini-3.5-flash-lite` (which returns HTTP 404 from Vertex AI publisher catalog in `europe-west2`) and `fallback_model` to `gemini-3.5-flash` (which is active and healthy):
+* Set `active_model` to an unavailable/retired model (e.g. `google/gemini-2.5-flash-lite-retired`) that causes a 404 from Vertex AI, and `fallback_model` to `google/gemini-3.1-flash-lite` (which is healthy):
   ```json
   {
-    "active_model": "google/gemini-3.5-flash-lite",
-    "fallback_model": "gemini-3.5-flash"
+    "active_model": "google/gemini-2.5-flash-lite-retired",
+    "fallback_model": "google/gemini-3.1-flash-lite"
   }
   ```
 * **Expected Output**: `200 OK`.
@@ -460,28 +460,28 @@ Open your browser to the interactive Swagger UI:
   }
   ```
 * **Live Fallback Mechanism**:
-  1. The backend calls Vertex AI with `google/gemini-3.5-flash-lite`.
+  1. The backend calls Vertex AI with `google/gemini-2.5-flash-lite-retired`.
   2. Vertex AI returns `404 NOT_FOUND` (`Publisher model ... not found`).
   3. The backend logs a warning: `Primary model generation failed, falling back`.
-  4. The backend automatically retries with `fallback_model`: `gemini-3.5-flash`.
-  5. The fallback request succeeds in ~4.5 seconds.
+  4. The backend automatically retries with `fallback_model`: `google/gemini-3.1-flash-lite`.
+  5. The fallback request succeeds in ~3.5 seconds.
 * **Expected Output**:
   * **HTTP Status**: `201 Created`
   * **Key Verification**:
     ```json
     {
       "version": 3,
-      "model_used": "gemini-3.5-flash"
+      "model_used": "google/gemini-3.1-flash-lite"
     }
     ```
-  * Notice that `"model_used"` is recorded as `"gemini-3.5-flash"`!
+  * Notice that `"model_used"` is recorded as `"google/gemini-3.1-flash-lite"`!
 
 #### Step 3: Restore Default Models
 * **Method & URL**: `PUT /api/admin/settings`
 * **Request Body**:
   ```json
   {
-    "active_model": "gemini-3.5-flash",
+    "active_model": "google/gemini-3.5-flash-lite",
     "fallback_model": "google/gemini-3.1-flash-lite"
   }
   ```
@@ -558,7 +558,7 @@ Open your browser to the interactive Swagger UI:
 | 4 | Shift Query | `GET /api/events?shift_key=...` | `200 OK` (sorted chronological) | AC-2 |
 | 5 | Event Deletion | `DELETE /api/events/{id}` | `204 No Content` $\rightarrow$ `404 Not Found` | AC-2 |
 | 6 | Zero Events Guard | `POST /api/reports/generate` (0 events) | `422 Unprocessable Entity` | AC-6 |
-| 7 | **Live LLM Handover** | `POST /api/reports/generate` | **`201 Created`** (Vertex AI `gemini-3.5-flash`) | AC-3, AC-4 |
+| 7 | **Live LLM Handover** | `POST /api/reports/generate` | **`201 Created`** (Vertex AI `google/gemini-3.5-flash-lite`) | AC-3, AC-4 |
 | 8 | Report History | `GET /api/reports?shift_key=...` | `200 OK` (list summaries) | AC-5 |
 | 9 | Version Increment | `POST /api/reports/generate` (after add) | `201 Created` (`version: 2`) | AC-5 |
 | 10 | Admin Auth | `GET /api/admin/settings` | `401 Unauthorized` without Bearer | AC-10 |
