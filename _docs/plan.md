@@ -761,3 +761,24 @@ The following architectural and design decisions were made during backend implem
    - Cache pruning automatically cleans up expired entries to prevent memory growth.
 5. **Admin Model Name Validation**:
    - Validation on `active_model` and `fallback_model` in `PUT /api/admin/settings` is strictly pattern-based (`^[a-zA-Z0-9._-]+$`, 1–128 characters) and deliberately avoids an allowlist or enum so that deprecated models can be dynamically configured during incident tests.
+
+---
+
+## 13. Dual-Naming Compatibility & Docker Container Serving (Issue #23)
+
+### Decision Context
+When running in Docker or standalone production deployments where FastAPI directly serves frontend static files (without the Vite development proxy), discrepancies between OpenAPI camelCase conventions (`shiftKey`, `modelUsed`, `createdAt`, `activeModel`) and FastAPI snake_case schemas (`shift_key`, `model_used`, `created_at`, `active_model`) caused `422 Unprocessable Entity` validation errors on query parameters and request bodies.
+
+### Architecture & Resolution
+1. **Pydantic Validation Aliases (`AliasChoices`)**:
+   - In `backend/app/schemas/`:
+     - `EventCreate.shift_key` supports `validation_alias=AliasChoices("shift_key", "shiftKey")`.
+     - `ReportGenerateRequest.shift_key` supports `validation_alias=AliasChoices("shift_key", "shiftKey")`.
+     - `AdminSettingsUpdate` supports `validation_alias=AliasChoices("active_model", "activeModel")` and `validation_alias=AliasChoices("fallback_model", "fallbackModel")`.
+2. **Query Parameter Dual-Support in Routers**:
+   - `GET /api/events` and `GET /api/reports` accept either `shift_key` or `shiftKey` as query parameters.
+3. **Pydantic Computed Fields for Dual Serialization**:
+   - `EventResponse`, `ReportSummary`, `ReportResponse`, and `AdminSettingsResponse` use `@computed_field` to serialize both camelCase and snake_case properties simultaneously.
+4. **Frontend Defensive Normalization**:
+   - `eventsApi.ts`, `reportsApi.ts`, and `adminApi.ts` normalize response payloads to ensure safe property access in both development (mock/proxy) and production (Docker direct).
+
