@@ -47,6 +47,16 @@ class ReportContent(BaseModel):
         return v.strip()
 
 
+class ReportGenerateRequest(BaseModel):
+    """Schema for requesting handover report generation for a shift."""
+
+    shift_key: str = Field(
+        ...,
+        pattern=SHIFT_KEY_REGEX,
+        description="Shift identifier in YYYY-MM-DD-(early|late|night) format",
+    )
+
+
 class ReportResponse(BaseModel):
     """Schema for returning a persisted shift handover report."""
 

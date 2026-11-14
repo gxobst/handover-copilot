@@ -1,5 +1,5 @@
 """API routers package."""
 
-from app.routers import events, health
+from app.routers import events, health, reports
 
-__all__ = ["events", "health"]
+__all__ = ["events", "health", "reports"]

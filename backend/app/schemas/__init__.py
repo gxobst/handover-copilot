@@ -2,7 +2,13 @@
 
 from .errors import ProblemDetails
 from .events import Category, EventCreate, EventResponse, SHIFT_KEY_REGEX
-from .reports import ActionPriority, OpenAction, ReportContent, ReportResponse
+from .reports import (
+    ActionPriority,
+    OpenAction,
+    ReportContent,
+    ReportGenerateRequest,
+    ReportResponse,
+)
 
 __all__ = [
     "ActionPriority",
@@ -12,6 +18,7 @@ __all__ = [
     "OpenAction",
     "ProblemDetails",
     "ReportContent",
+    "ReportGenerateRequest",
     "ReportResponse",
     "SHIFT_KEY_REGEX",
 ]

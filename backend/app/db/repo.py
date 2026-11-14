@@ -13,6 +13,12 @@ from app.db.events_repo import (
     InMemoryEventRepository,
 )
 from app.db.models import Event
+from app.db.reports_repo import (
+    InMemoryReportRepository,
+    ReportRepository,
+    SqlReportRepository,
+    get_report_repository,
+)
 from app.db.session import get_db
 from app.schemas.events import Category, EventCreate, EventResponse
 
@@ -89,4 +95,8 @@ __all__ = [
     "InMemoryEventRepository",
     "SqlEventRepository",
     "get_event_repository",
+    "ReportRepository",
+    "InMemoryReportRepository",
+    "SqlReportRepository",
+    "get_report_repository",
 ]

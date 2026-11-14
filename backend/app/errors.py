@@ -48,6 +48,17 @@ async def request_validation_exception_handler(
     )
 
 
+class GenerationFailedException(StarletteHTTPException):
+    """Exception raised when report generation fails for both active and fallback models."""
+
+    def __init__(
+        self,
+        detail: str = "Handover report generation failed for both active and fallback models",
+    ) -> None:
+        super().__init__(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+        self.title = "Generation Failed"
+
+
 async def http_exception_handler(
     request: Request,
     exc: StarletteHTTPException,
@@ -56,10 +67,16 @@ async def http_exception_handler(
 
     Returns RFC 9457 ProblemDetails with corresponding HTTP status and application/problem+json media type.
     """
-    try:
-        title = HTTPStatus(exc.status_code).phrase
-    except ValueError:
-        title = "HTTP Error"
+    custom_title = getattr(exc, "title", None)
+    if custom_title:
+        title = custom_title
+    elif exc.status_code == 422:
+        title = "Unprocessable Entity"
+    else:
+        try:
+            title = HTTPStatus(exc.status_code).phrase
+        except ValueError:
+            title = "HTTP Error"
 
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     trace_id = getattr(request.state, "trace_id", None) or request.headers.get("x-trace-id")
