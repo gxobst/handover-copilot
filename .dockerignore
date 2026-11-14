@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python & virtual environments
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.venv
+backend/.venv
+*.db
+*.sqlite
+*.sqlite3
+handover.db
+backend/handover.db
+
+# Node.js & Frontend builds
+**/node_modules
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Playwright & test artifacts
+scripts/screenshots
+**/*.log
+
+# Environment files
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
