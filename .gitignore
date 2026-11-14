@@ -60,3 +60,7 @@ test-results/
 # OS
 .DS_Store
 Thumbs.db
+
+# Manual Testing Guides
+_docs/manual-testing-guide.md
+*manual-testing-guide*.md
