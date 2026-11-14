@@ -28,6 +28,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DATABASE_URL", "database_url"),
         description="Database connection URL",
     )
+    llm_backend: str = Field(
+        default="fake",
+        validation_alias=AliasChoices("LLM_BACKEND", "llm_backend"),
+        description="LLM backend implementation ('fake' or 'vertex')",
+    )
+    gcp_project: str = Field(
+        default="",
+        validation_alias=AliasChoices("GCP_PROJECT", "gcp_project"),
+        description="Google Cloud project ID for Vertex AI",
+    )
+    gcp_location: str = Field(
+        default="europe-west2",
+        validation_alias=AliasChoices("GCP_LOCATION", "gcp_location"),
+        description="Google Cloud region/location for Vertex AI",
+    )
+    llm_timeout_s: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices("LLM_TIMEOUT_S", "llm_timeout_s"),
+        description="LLM request timeout in seconds",
+    )
+    active_model: str = Field(
+        default="gemini-3.5-flash",
+        validation_alias=AliasChoices("ACTIVE_MODEL", "active_model"),
+        description="Active Gemini model name for report generation",
+    )
+    fallback_model: str = Field(
+        default="gemini-4-argon",
+        validation_alias=AliasChoices("FALLBACK_MODEL", "fallback_model"),
+        description="Fallback Gemini model name for report generation",
+    )
 
     @property
     def app_env(self) -> str:
