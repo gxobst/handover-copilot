@@ -1014,3 +1014,34 @@ To ensure build reproducibility, eliminate duplicate workflow execution, and uph
   - `infra/06-cloud-run-migrate-job.sh` enforces safe variable expansion:
     `RUNTIME_EMAIL="${RUNTIME_EMAIL:-${RUNTIME_SERVICE_ACCOUNT:-handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com}}"`
     preventing `unbound variable` errors under bash strict mode (`set -euo pipefail`).
+
+
+## 19. OpenTelemetry Instrumentation and Local LGTM Observability Stack (Issues #34 & #35)
+
+### 1. Backend OpenTelemetry Instrumentation (#34)
+The FastAPI backend is fully instrumented with standard W3C / OpenTelemetry semantic conventions across traces, metrics, root spans, and structured logs:
+- **Resource Attributes (`backend/app/telemetry.py`):**
+  - `service.name`: Configured from `Settings.service_name` (default `"handover"`, with aliases `OTEL_SERVICE_NAME` and `SERVICE_NAME`).
+  - `deployment.environment`: Configured dynamically from `Settings.environment` (`APP_ENV`).
+  - `service.version`: Configured dynamically from `Settings.version` (`APP_VERSION`).
+- **TracerProvider & MeterProvider:** Both providers attach the unified `Resource` so all exported spans and metrics carry standard resource metadata.
+- **Root HTTP Spans (`TelemetryMiddleware`):** Injects `service.name`, `deployment.environment`, and `service.version` onto root `http.server` spans.
+- **Structured JSON Logs (`structlog`):** Injects `service`, `service.name`, `env`, and `version` into every log event dictionary.
+- **Privacy Filter Preservation:** Zero-PII sanitization and metric cardinality limits remain strictly enforced.
+
+### 2. Isolated Observability Stack in `observability/` (#35)
+A standalone Docker Compose project named `handover-observability` is provided in `observability/docker-compose.yml`, completely decoupled from the root application Compose stack:
+- **OpenTelemetry Collector Contrib (`otel-collector`):**
+  - Ports: `4317` (OTLP gRPC), `4318` (OTLP HTTP), `8889` (Prometheus metrics exporter), `13133` (health check).
+  - Pipelines for `traces` (to Tempo via OTLP gRPC), `metrics` (to Prometheus), and `logs` (to Loki).
+- **Prometheus (`prometheus`):**
+  - Port `9090`, scrapes OpenTelemetry Collector metrics on `otel-collector:8889`.
+- **Loki (`loki`):**
+  - Port `3100`, standalone filesystem storage for log aggregation.
+- **Tempo (`tempo`):**
+  - Port `3200` (HTTP query/status) and `4317` (internal OTLP gRPC ingestion), local filesystem block storage.
+- **Grafana (`grafana`):**
+  - Port `3000`, anonymous admin enabled (`GF_AUTH_ANONYMOUS_ENABLED=true`).
+  - Pre-provisioned datasources for Prometheus, Loki, and Tempo.
+  - Bidirectional correlation: Tempo `tracesToLogs` navigates from trace spans to correlated Loki logs, and Loki `derivedFields` extracts `trace_id` to jump directly into Tempo traces.
+- **Verification Script:** `scripts/verify_observability_stack.py` provides automated schema, port, and live health verification across all 5 services.
