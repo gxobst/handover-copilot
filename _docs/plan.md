@@ -1072,3 +1072,37 @@ All application metrics in `backend/app/telemetry.py` are enriched with `environ
   5. HTTP Request Throughput & Error Rate (grouped by HTTP status code).
   - All PromQL panel queries strictly filter by `{environment=~"$environment", version=~"$version"}`.
 - **Automated Verification:** `scripts/verify_observability_stack.py` validates dashboard syntax, mounts, template variables, PromQL queries, and live endpoint responsiveness.
+
+
+## 21. Standalone Observability Stack Deployment and Dev/Prod Connection (Issue #37)
+
+### 1. Dedicated Observability Stack Host on GCP
+The observability stack is deployed on an independent, dedicated Compute Engine virtual machine instance decoupled from the Cloud Run application stack:
+- **VM Instance:** `handover-observability`
+- **Location & Network:** Zone `europe-west2-a`, attached to VPC `default` / subnet `default` (`10.154.0.0/20`).
+- **Network Interfaces:**
+  - **Internal IP:** `10.154.0.3` (accessible directly by Cloud Run services via Direct VPC Egress).
+  - **External IP:** `34.153.185.34` (accessible for Grafana UI, Prometheus API, and verification).
+- **VPC Firewall:** `allow-observability-ingress` configured on network tag `observability-stack` allowing ports `tcp:3000` (Grafana), `4317` & `4318` (OTLP ingestion), `9090` (Prometheus), `3100` (Loki), `3200` (Tempo), and `13133` (Collector health).
+- **Provisioning Automation:** `infra/08-observability-stack.sh` and `infra/08-observability-stack.ps1` manage instance creation, startup script execution, and systemd service `observability-stack.service` persistence.
+- **Service Endpoints (All HTTP 200 Verified):**
+  - OpenTelemetry Collector: `http://34.153.185.34:13133/`
+  - Prometheus: `http://34.153.185.34:9090/-/ready`
+  - Loki: `http://34.153.185.34:3100/ready`
+  - Tempo: `http://34.153.185.34:3200/ready`
+  - Grafana: `http://34.153.185.34:3000/api/health`
+
+### 2. Dual Connection: Development and Production
+Both serverless Cloud Run environments are configured to export telemetry to the standalone collector over Direct VPC Egress without exposing internal telemetry traffic to the public internet:
+- **`handover-dev`:**
+  - Cloud Run service configured with `OTEL_EXPORTER_OTLP_ENDPOINT=http://10.154.0.3:4318` and Direct VPC Egress (`--network=default --subnet=default --vpc-egress=private-ranges-only`).
+- **`handover-prod`:**
+  - Cloud Run service configured with `OTEL_EXPORTER_OTLP_ENDPOINT=http://10.154.0.3:4318` and Direct VPC Egress (`--network=default --subnet=default --vpc-egress=private-ranges-only`).
+- **Pipeline & Script Persistence:**
+  - `infra/07-cloud-run-services.sh` / `.ps1` and `infra/deploy.sh` / `.ps1` persist `OTEL_EXPORTER_OTLP_ENDPOINT`.
+  - `.github/workflows/gcp-pipeline.yml` preserves the endpoint on dev deployments.
+  - `.github/workflows/promote-prod.yml` preserves the endpoint on production promotions.
+- **Active Telemetry Ingestion & Isolation:**
+  - Prometheus TSDB verified storing active series for both `environment="dev"` and `environment="prod"`.
+  - Grafana dashboard `Shift Handover - Application Metrics` (`handover-app-metrics`) accessible on `http://34.153.185.34:3000/d/handover-app-metrics` with dynamic `$environment` and `$version` filtering.
+- **Automated Verification:** `scripts/verify_deployed_observability.py` provides automated end-to-end verification of VM state, firewall rules, 5 health endpoints, Cloud Run configurations, Prometheus series presence, and Grafana dashboard REST API response.
