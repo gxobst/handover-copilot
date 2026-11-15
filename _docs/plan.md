@@ -1106,3 +1106,52 @@ Both serverless Cloud Run environments are configured to export telemetry to the
   - Prometheus TSDB verified storing active series for both `environment="dev"` and `environment="prod"`.
   - Grafana dashboard `Shift Handover - Application Metrics` (`handover-app-metrics`) accessible on `http://34.153.185.34:3000/d/handover-app-metrics` with dynamic `$environment` and `$version` filtering.
 - **Automated Verification:** `scripts/verify_deployed_observability.py` provides automated end-to-end verification of VM state, firewall rules, 5 health endpoints, Cloud Run configurations, Prometheus series presence, and Grafana dashboard REST API response.
+
+
+## 22. Actionable User-Impact Failure Alerts as Code (Issue #38)
+
+To ensure operational awareness reflects real user pain rather than arbitrary infrastructure/hardware spikes, Prometheus alerting rules are defined as code in `observability/alert.rules.yml`:
+
+### 1. User-Impact Alert Definitions
+- **`HandoverGenerationFailureRateHigh` (Critical):**
+  - **Threshold & Duration:** Report generation failure rate exceeds 20% (> 0.2) over a 10-minute sliding window, sustained for 5 minutes (`for: 5m`).
+  - **PromQL Expression:**
+    ```promql
+    (
+      sum by (service, environment, version) (rate(handover_reports_generated_total{outcome="error"}[10m]))
+      /
+      sum by (service, environment, version) (rate(handover_reports_generated_total[10m]))
+    ) > 0.2
+    ```
+  - **User Impact:** Shift leads cannot generate shift handovers, forcing incoming teams to start blind.
+- **`HandoverHttpErrorRateHigh` (Warning):**
+  - **Threshold & Duration:** HTTP 5xx server error rate exceeds 10% (> 0.1) over a 5-minute sliding window, sustained for 5 minutes (`for: 5m`).
+  - **PromQL Expression:**
+    ```promql
+    (
+      sum by (service, environment, version) (rate(handover_http_requests_total{status_code=~"5.."}[5m]))
+      /
+      sum by (service, environment, version) (rate(handover_http_requests_total[5m]))
+    ) > 0.1
+    ```
+
+### 2. Actionable Labels and Annotation Contracts
+All alerts maintain dimensional integrity via `sum by (service, environment, version)`:
+- **Labels:**
+  - `service`: `{{ $labels.service }}` (or `"handover"`)
+  - `environment`: `{{ $labels.environment }}` (`dev` or `prod`)
+  - `version`: `{{ $labels.version }}`
+  - `owner`: `"shift-operations"`
+  - `severity`: `"critical"` or `"warning"`
+- **Annotations:**
+  - `summary`: Human-readable summary of the alert condition.
+  - `description`: Explains actual operational consequences on end users.
+  - `dashboard_url`: Direct URL to the filtered Grafana application metrics dashboard:
+    `http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment={{ $labels.environment }}&var-version={{ $labels.version }}`
+  - `runbook_url`: Link to operational triage guide.
+
+### 3. Provisioning & Live Verification
+- **Mount & Config:** `observability/prometheus.yml` specifies `rule_files: ['/etc/prometheus/alert.rules.yml']` and `observability/docker-compose.yml` mounts the file into `/etc/prometheus/alert.rules.yml:ro`.
+- **Infrastructure Scripts:** `infra/08-observability-stack.sh` and `infra/08-observability-stack.ps1` include `alert.rules.yml` in configuration synchronization and reload Prometheus.
+- **Live Deployment Status:** Verified active on `http://34.153.185.34:9090/api/v1/rules` with HTTP 200 `status: "success"` and health `"ok"`.
+- **Automated Verification:** `scripts/verify_alerts.py` validates rule syntax, PromQL expressions, threshold/duration constraints, label contracts, annotations, and remote Prometheus API loading.
