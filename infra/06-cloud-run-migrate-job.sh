@@ -2,6 +2,7 @@
 # ==============================================================================
 # 06-cloud-run-migrate-job.sh - Provision Cloud Run Database Migration Job
 # Idempotent: creates or updates the job.
+# Uses AlloyDB (or configured DATABASE_URL) without Cloud SQL proxies.
 # ==============================================================================
 set -euo pipefail
 
@@ -12,8 +13,6 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app:${IMAGE_TAG}"
 JOB_NAME="handover-migrate"
 RUNTIME_EMAIL="handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
-DB_INSTANCE_NAME="${DB_INSTANCE:-handover-db}"
-CLOUDSQL_CONNECTION="${PROJECT_ID}:${REGION}:${DB_INSTANCE_NAME}"
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "ERROR: GCP_PROJECT is not set and could not be determined from gcloud config." >&2
@@ -28,7 +27,7 @@ COMMON_FLAGS=(
   "--project=${PROJECT_ID}"
   "--service-account=${RUNTIME_EMAIL}"
   "--set-secrets=DATABASE_URL=DATABASE_URL:latest"
-  "--set-cloudsql-instances=${CLOUDSQL_CONNECTION}"
+  "--clear-cloudsql-instances"
   "--command=uv"
   "--args=run,alembic,upgrade,head"
   "--max-retries=1"

@@ -1,41 +1,75 @@
-# 05-database.ps1 - Provision Database Persistence
+﻿# ==============================================================================
+# 05-database.ps1 - Provision AlloyDB Express Database Persistence in europe-west2
+# Matches plan.md §6 & §14: AlloyDB cluster with scale-to-zero compute (PostgreSQL 18).
+# Idempotent: safe to run multiple times.
+# ==============================================================================
+[CmdletBinding()]
+param(
+    [string]$ProjectId = $env:GCP_PROJECT,
+    [string]$Region = "europe-west2",
+    [string]$ClusterId = "handover-cluster",
+    [string]$InstanceId = "handover-primary",
+    [string]$DbPassword = "Yg0vCNCSfVTNpicWso_EBwDqvk4Vd9V1"
+)
+
 $ErrorActionPreference = "Stop"
-$ProjectId = if ($env:GCP_PROJECT) { $env:GCP_PROJECT } else { (gcloud.cmd config get-value project) }
-$Region = if ($env:GCP_REGION) { $env:GCP_REGION } else { "europe-west2" }
-$Instance = if ($env:DB_INSTANCE) { $env:DB_INSTANCE } else { "handover-db" }
-$DbName = if ($env:DB_NAME) { $env:DB_NAME } else { "handover" }
-$DbPass = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { "Yg0vCNCSfVTNpicWso_EBwDqvk4Vd9V1" }
 
-$exists = & gcloud.cmd sql instances describe $Instance --project=$ProjectId 2>$null
-if (-not $exists) {
-    Write-Host "Creating Cloud SQL PostgreSQL instance $Instance in $Region..."
-    & gcloud.cmd sql instances create $Instance `
-      --database-version="POSTGRES_16" `
-      --tier="db-f1-micro" `
-      --edition="ENTERPRISE" `
-      --region=$Region `
-      --storage-size="10GB" `
-      --storage-auto-increase `
-      --root-password=$DbPass `
-      --project=$ProjectId
+if (-not $ProjectId) {
+    $ProjectId = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" config get-value project 2>$null
+}
+if (-not $ProjectId) {
+    Write-Error "ERROR: ProjectId is required and could not be determined from gcloud config."
 }
 
-Write-Host "Waiting for instance $Instance to be RUNNABLE..."
+Write-Host "==> Configuring AlloyDB persistence in '$Region' (project: $ProjectId)..."
+
+# Check if cluster exists
+$clusterCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb clusters describe $ClusterId --region=$Region --project=$ProjectId 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "AlloyDB cluster '$ClusterId' already exists."
+} else {
+    Write-Host "Creating AlloyDB cluster '$ClusterId' (PostgreSQL 18) with Private Service Connect..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb clusters create $ClusterId `
+        --region=$Region `
+        --project=$ProjectId `
+        --password=$DbPassword `
+        --database-version="POSTGRES_18" `
+        --enable-private-service-connect
+}
+
+# Check if primary instance exists
+$instCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "AlloyDB primary instance '$InstanceId' already exists."
+} else {
+    Write-Host "Creating AlloyDB primary instance '$InstanceId' (1 vCPU)..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances create $InstanceId `
+        --cluster=$ClusterId `
+        --region=$Region `
+        --project=$ProjectId `
+        --instance-type="PRIMARY" `
+        --cpu-count=1
+}
+
+Write-Host "Waiting for AlloyDB primary instance '$InstanceId' to become READY..."
 while ($true) {
-    $state = (& gcloud.cmd sql instances describe $Instance --project=$ProjectId --format="value(state)" 2>$null)
-    Write-Host "State: $state"
-    if ($state -eq "RUNNABLE") { break }
-    Start-Sleep -Seconds 10
+    $state = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId --format="value(state)" 2>$null
+    Write-Host "Current instance state: $state"
+    if ($state -eq "READY") {
+        break
+    }
+    Start-Sleep -Seconds 15
 }
 
-$dbExists = & gcloud.cmd sql databases describe $DbName --instance=$Instance --project=$ProjectId 2>$null
-if (-not $dbExists) {
-    Write-Host "Creating database $DbName..."
-    & gcloud.cmd sql databases create $DbName --instance=$Instance --project=$ProjectId
-}
+$ip = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId --format="value(ipAddress)" 2>$null
+Write-Host "AlloyDB instance '$InstanceId' is READY (IP: $ip)."
 
-$connectionName = "$ProjectId`:$Region`:$Instance"
-$databaseUrl = "postgresql+psycopg://postgres:$DbPass@/$DbName`?host=/cloudsql/$connectionName"
-Write-Host "Updating DATABASE_URL secret..."
-$databaseUrl | & gcloud.cmd secrets versions add "DATABASE_URL" --data-file=- --project=$ProjectId | Out-Null
-Write-Host "==> Database $DbName configured."
+$databaseUrl = "postgresql+psycopg://postgres:${DbPassword}@${ip}:5432/postgres"
+
+Write-Host "Updating DATABASE_URL in Secret Manager..."
+$tempFile = [System.IO.Path]::GetTempFileName()
+[System.IO.File]::WriteAllText($tempFile, $databaseUrl)
+& "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" secrets versions add "DATABASE_URL" --data-file=$tempFile --project=$ProjectId
+Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+
+Write-Host "==> AlloyDB cluster '$ClusterId' / instance '$InstanceId' configured successfully."
