@@ -1218,3 +1218,32 @@ To resolve the active incident, restore continuous integration and deployment pi
 - **On-Call Integrity**: Retained `agy` as the default on-call agent runner (`DEFAULT_AGENT_CMD = "agy"` in `on-call-engineer/config.py` and `dispatcher.py`).
 
 
+## 25. LLM Generation Capping and Strict Admin Model Allowlist (Issue #41)
+
+To protect public Cloud Run deployments and live demo instances against runaway Vertex AI model usage and unpredictable cloud spend, strict quota controls and model governance were implemented:
+
+### 1. Lifetime User Generation Cap (Max 20 Total Requests)
+- **Hard Lifetime Ceiling**: Enforces a strict limit of 20 total report generation requests per user (client IP) on `POST /api/reports/generate`.
+- **No Expiration / Reset**: Unlike short-term burst rate limits, user request counts never expire. Once a client IP generates 20 reports in total, all subsequent requests are blocked.
+- **Global Ceiling**: In addition to per-client limits, a hard global ceiling of 20 total generation requests across the entire service instance ensures absolute protection against distributed quota drainage.
+- **Client IP Resolution**: Safely extracts the original client IP from `X-Forwarded-For` (first hop) when behind Cloud Run / GCP load balancers, with fallback to `request.client.host`.
+- **RFC 9457 ProblemDetails (429)**: Requests exceeding limits return HTTP `429 Too Many Requests` with standard problem details (`status: 429`, `title: "Too Many Requests"`, descriptive quota protection `detail`, and W3C `trace_id`), avoiding unhandled exceptions or spurious error logs.
+
+### 2. Universal Enforcement — NO Admin Token Bypass
+- **Public Repository Security Boundary**: Because the repository, documentation, and configuration are open-source and public, default admin bearer tokens (`Authorization: Bearer <ADMIN_TOKEN>`) are publicly readable. Therefore, admin tokens **do not bypass** the 20-generation limit. Universal enforcement applies across all callers.
+- **Local Testing Support**: For local automated testing in CI/CD, `Settings.rate_limit_enabled = False` disables rate-limiting during pytest runs without altering production behavior.
+
+### 3. Strict Admin Two-Model Allowlist
+- **Exclusively Authorized Models**: Restricts `PUT /api/admin/settings` strictly to:
+  - `google/gemini-3.5-flash-lite` (or `gemini-3.5-flash-lite`)
+  - `google/gemini-3.1-flash-lite` (or `gemini-3.1-flash-lite`)
+- **Order Swapping**: Administrators can freely switch between the two models as primary (`active_model`) or fallback (`fallback_model`).
+- **Strict Prohibition**: Specifying any model outside the two allowed models (such as `gemini-2.5-flash-lite`, `gpt-4`, `claude-3`, or arbitrary strings) is strictly forbidden and rejected with HTTP `422 Unprocessable Content`.
+
+### 4. Verification & Testing
+- **Rate Limit Test Suite**: `backend/tests/test_rate_limit.py` (15 tests) verifies sliding window limits, 20-request user lifetime cap, 20-request global cap, IP extraction, RFC 9457 responses, thread safety, pruning, and OpenTelemetry 429 metric emission.
+- **Admin Schema Tests**: `backend/tests/test_admin.py` and `backend/tests/test_schemas.py` verify model swapping and strict 422 rejection for unauthorized models.
+- **Regression Suite**: Full backend suite (253 passed, 7 skipped), frontend suite (324 passed), and on-call engineer suite (18 passed).
+
+
+
