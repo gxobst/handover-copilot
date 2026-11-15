@@ -14,6 +14,13 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    service_name: str = Field(
+        default="handover",
+        validation_alias=AliasChoices(
+            "OTEL_SERVICE_NAME", "SERVICE_NAME", "service_name"
+        ),
+        description="Application / OpenTelemetry service name",
+    )
     environment: str = Field(
         default="local",
         validation_alias=AliasChoices("APP_ENV", "app_env", "environment"),
@@ -109,6 +116,10 @@ class Settings(BaseSettings):
         ),
         description="OTLP exporter headers (comma-separated key=value)",
     )
+
+    @property
+    def app_service_name(self) -> str:
+        return self.service_name
 
     @property
     def app_env(self) -> str:

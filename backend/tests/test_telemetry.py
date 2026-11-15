@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config import Settings, get_settings
 from app.db.models import AppSetting
 from app.db.session import create_db_engine, get_db
 from app.main import create_app
@@ -27,7 +28,10 @@ from app.telemetry import (
     get_in_memory_metric_reader,
     get_in_memory_span_exporter,
     get_logger,
+    get_meter_provider,
+    get_telemetry_resource,
     get_tracer,
+    get_tracer_provider,
     init_telemetry,
     is_sensitive_key,
     record_event_created,
@@ -227,6 +231,7 @@ def test_privacy_filter_log_output_scrubbing(capsys):
     assert "msg" in log_data
     assert "trace_id" in log_data
     assert "span_id" in log_data
+    assert "service" in log_data
     assert "env" in log_data
     assert "version" in log_data
 
@@ -533,3 +538,163 @@ def test_handover_generation_fallback_metric_and_span(client: TestClient, db_ses
     ]
     assert len(fallback_spans) == 1
     assert fallback_spans[0].attributes.get("model") == "gemini-3.1-flash-lite"
+
+
+# -----------------------------------------------------------------------------
+# Issue #34: OpenTelemetry Resource Attributes & Structlog Context Tests
+# -----------------------------------------------------------------------------
+
+def test_settings_service_name_and_aliases():
+    """Verify Settings defines service_name defaulting to 'handover' with alias support."""
+    default_settings = Settings()
+    assert default_settings.service_name == "handover"
+    assert default_settings.app_service_name == "handover"
+
+    # Direct keyword argument
+    custom = Settings(service_name="my-custom-service")
+    assert custom.service_name == "my-custom-service"
+
+    # Alias: OTEL_SERVICE_NAME
+    otel_alias = Settings(OTEL_SERVICE_NAME="otel-service-alias")
+    assert otel_alias.service_name == "otel-service-alias"
+
+    # Alias: SERVICE_NAME
+    service_alias = Settings(SERVICE_NAME="service-name-alias")
+    assert service_alias.service_name == "service-name-alias"
+
+
+def test_resource_attributes_configuration():
+    """Verify TracerProvider, MeterProvider, and active Resource contain service.name, deployment.environment, and service.version."""
+    reset_telemetry_for_tests()
+    default_cfg = get_settings()
+
+    tracer_provider = get_tracer_provider()
+    meter_provider = get_meter_provider()
+    resource = get_telemetry_resource()
+
+    for target in (tracer_provider.resource, meter_provider.resource, resource):
+        assert target.attributes["service.name"] == "handover"
+        assert target.attributes["deployment.environment"] == default_cfg.environment
+        assert target.attributes["service.version"] == default_cfg.version
+
+
+def test_in_memory_span_exporter_contains_resource_attributes():
+    """Verify spans captured in InMemorySpanExporter carry the configured resource attributes."""
+    reset_telemetry_for_tests()
+    default_cfg = get_settings()
+    exporter = get_in_memory_span_exporter()
+    assert exporter is not None
+    exporter.clear()
+
+    tracer = get_tracer("test_resource_attributes")
+    with tracer.start_as_current_span("span_with_resource"):
+        pass
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+
+    assert span.resource is not None
+    assert span.resource.attributes["service.name"] == "handover"
+    assert span.resource.attributes["deployment.environment"] == default_cfg.environment
+    assert span.resource.attributes["service.version"] == default_cfg.version
+
+
+def test_custom_settings_propagation_to_resource_attributes():
+    """Verify custom service_name, environment, and version passed via Settings propagate to resource attributes."""
+    custom_settings = Settings(
+        service_name="custom-svc",
+        environment="staging",
+        version="2.0.0",
+    )
+    reset_telemetry_for_tests(settings=custom_settings)
+
+    try:
+        tracer_provider = get_tracer_provider()
+        meter_provider = get_meter_provider()
+        resource = get_telemetry_resource()
+
+        for target in (tracer_provider.resource, meter_provider.resource, resource):
+            assert target.attributes["service.name"] == "custom-svc"
+            assert target.attributes["deployment.environment"] == "staging"
+            assert target.attributes["service.version"] == "2.0.0"
+
+        # Verify exported span reflects custom resource attributes
+        exporter = get_in_memory_span_exporter()
+        assert exporter is not None
+        exporter.clear()
+
+        tracer = get_tracer("test_custom_settings")
+        with tracer.start_as_current_span("custom_span"):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].resource.attributes["service.name"] == "custom-svc"
+        assert spans[0].resource.attributes["deployment.environment"] == "staging"
+        assert spans[0].resource.attributes["service.version"] == "2.0.0"
+    finally:
+        reset_telemetry_for_tests()
+
+
+def test_structlog_log_record_service_env_version(capsys):
+    """Verify structlog JSON log records contain service, service.name, env, and version via _add_app_context."""
+    reset_telemetry_for_tests()
+    default_cfg = get_settings()
+    logger = get_logger("test_structlog_context")
+
+    logger.info("Application context test event", extra_key="test_val")
+    captured = capsys.readouterr()
+    log_line = captured.out.strip()
+    assert log_line
+
+    data = json.loads(log_line)
+    assert data["service"] == "handover"
+    assert data["service.name"] == "handover"
+    assert data["env"] == default_cfg.environment
+    assert data["version"] == default_cfg.version
+    assert data["extra_key"] == "test_val"
+
+    # Test with custom settings
+    custom_cfg = Settings(
+        service_name="custom-logger-svc",
+        environment="production",
+        version="3.5.1",
+    )
+    reset_telemetry_for_tests(settings=custom_cfg)
+    try:
+        logger.info("Custom application context test event")
+        captured_custom = capsys.readouterr()
+        log_line_custom = captured_custom.out.strip()
+        assert log_line_custom
+
+        data_custom = json.loads(log_line_custom)
+        assert data_custom["service"] == "custom-logger-svc"
+        assert data_custom["service.name"] == "custom-logger-svc"
+        assert data_custom["env"] == "production"
+        assert data_custom["version"] == "3.5.1"
+    finally:
+        reset_telemetry_for_tests()
+
+
+def test_telemetry_middleware_attaches_service_env_version_span_attributes(client: TestClient):
+    """Verify TelemetryMiddleware attaches service.name, deployment.environment, and service.version to http.server spans."""
+    reset_telemetry_for_tests()
+    default_cfg = get_settings()
+    exporter = get_in_memory_span_exporter()
+    assert exporter is not None
+    exporter.clear()
+
+    res = client.get("/api/healthz")
+    assert res.status_code == 200
+
+    spans = exporter.get_finished_spans()
+    http_spans = [s for s in spans if s.name == "http.server"]
+    assert len(http_spans) >= 1
+    http_span = http_spans[0]
+
+    assert http_span.attributes is not None
+    assert http_span.attributes["service.name"] == "handover"
+    assert http_span.attributes["deployment.environment"] == default_cfg.environment
+    assert http_span.attributes["service.version"] == default_cfg.version
+

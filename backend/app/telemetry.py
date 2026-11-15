@@ -214,8 +214,10 @@ def structlog_privacy_filter(
 def _add_app_context(
     logger: Any, method_name: str, event_dict: dict[str, Any]
 ) -> dict[str, Any]:
-    """Inject application environment and version metadata into structlog event dictionary."""
-    settings = get_settings()
+    """Inject application service, environment, and version metadata into structlog event dictionary."""
+    settings = get_active_settings()
+    event_dict.setdefault("service", settings.service_name)
+    event_dict.setdefault("service.name", settings.service_name)
     event_dict.setdefault("env", settings.environment)
     event_dict.setdefault("version", settings.version)
     return event_dict
@@ -249,6 +251,8 @@ _events_created_counter: Optional[Counter] = None
 _reports_generated_counter: Optional[Counter] = None
 _generation_duration_histogram: Optional[Histogram] = None
 _fallback_used_counter: Optional[Counter] = None
+_resource: Optional[Resource] = None
+_active_settings: Optional[Settings] = None
 _initialized: bool = False
 
 
@@ -260,21 +264,24 @@ def init_telemetry(
     global _in_memory_span_exporter, _in_memory_metric_reader
     global _events_created_counter, _reports_generated_counter
     global _generation_duration_histogram, _fallback_used_counter
+    global _resource, _active_settings
     global _initialized
 
     if _initialized and not force_reinit:
         return
 
     cfg = settings or get_settings()
+    _active_settings = cfg
 
     # Resource attributes according to plan.md §16
     resource = Resource.create(
         {
-            "service.name": "handover",
+            "service.name": cfg.service_name,
             "deployment.environment": cfg.environment,
             "service.version": cfg.version,
         }
     )
+    _resource = resource
 
     # 1. Setup TracerProvider
     tracer_provider = TracerProvider(resource=resource)
@@ -324,6 +331,9 @@ def init_telemetry(
         meter_provider = MeterProvider(
             resource=resource, metric_readers=[_in_memory_metric_reader]
         )
+
+    if not hasattr(meter_provider, "resource"):
+        meter_provider.resource = resource  # type: ignore[attr-defined]
 
     _tracer_provider = tracer_provider
     _meter_provider = meter_provider
@@ -382,6 +392,41 @@ init_telemetry()
 # Telemetry Accessors & Helpers
 # -----------------------------------------------------------------------------
 
+def get_telemetry_resource() -> Resource:
+    """Return active OpenTelemetry Resource."""
+    global _resource
+    if _resource is None:
+        init_telemetry()
+    assert _resource is not None
+    return _resource
+
+
+def get_active_settings() -> Settings:
+    """Return active Settings instance configured for telemetry."""
+    global _active_settings
+    if _active_settings is not None:
+        return _active_settings
+    return get_settings()
+
+
+def get_tracer_provider() -> TracerProvider:
+    """Return configured OpenTelemetry TracerProvider."""
+    global _tracer_provider
+    if _tracer_provider is None:
+        init_telemetry()
+    assert _tracer_provider is not None
+    return _tracer_provider
+
+
+def get_meter_provider() -> MeterProvider:
+    """Return configured OpenTelemetry MeterProvider."""
+    global _meter_provider
+    if _meter_provider is None:
+        init_telemetry()
+    assert _meter_provider is not None
+    return _meter_provider
+
+
 def get_tracer(name: str = "handover") -> Tracer:
     """Return configured OpenTelemetry Tracer."""
     global _tracer_provider
@@ -415,9 +460,9 @@ def get_in_memory_metric_reader() -> Optional[InMemoryMetricReader]:
     return _in_memory_metric_reader
 
 
-def reset_telemetry_for_tests() -> None:
+def reset_telemetry_for_tests(settings: Optional[Settings] = None) -> None:
     """Reset in-memory span exporter and metric reader for isolated test assertions."""
-    init_telemetry(force_reinit=True)
+    init_telemetry(settings=settings, force_reinit=True)
 
 
 def get_current_trace_id() -> Optional[str]:
@@ -568,6 +613,8 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             carrier["traceparent"] = f"00-{incoming_trace_id}-0000000000000001-01"
             extracted_ctx = TraceContextTextMapPropagator().extract(carrier)
 
+        settings = get_active_settings()
+
         # Start http.server span for request lifecycle
         span = tracer.start_span(
             name="http.server",
@@ -577,6 +624,9 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                 "http.method": request.method,
                 "http.route": request.url.path,
                 "http.url": str(request.url),
+                "service.name": settings.service_name,
+                "deployment.environment": settings.environment,
+                "service.version": settings.version,
             },
         )
 

@@ -6,8 +6,8 @@ This document specifies the OpenTelemetry instrumentation, structured logging, a
 
 ## 1. Resource Attributes
 
-Every telemetry signal (traces, metrics, logs) is tagged with standard W3C / OpenTelemetry resource attributes:
-- `service.name`: `"handover"`
+Every telemetry signal (traces, metrics, logs) is tagged with standard W3C / OpenTelemetry resource attributes dynamically configured from application settings (`Settings`):
+- `service.name`: Set from `settings.service_name` (default: `"handover"`, with environment variable alias support for `OTEL_SERVICE_NAME`, `SERVICE_NAME`, and `service_name`).
 - `deployment.environment`: Set from `settings.environment` (or `APP_ENV`: `local`, `dev`, `prod`).
 - `service.version`: Set from `settings.version` (or `APP_VERSION`, matching container image tag).
 
@@ -53,6 +53,7 @@ Logs are emitted as single-line JSON with standard fields:
 - `msg`: Log message
 - `trace_id`: Correlated 32-hex W3C trace ID
 - `span_id`: Correlated 16-hex W3C span ID
+- `service` / `service.name`: Service name (`settings.service_name`, default: `"handover"`)
 - `env`: Environment (`local`, `dev`, `prod`)
 - `version`: Application version
 
