@@ -7,6 +7,8 @@
 [![Promote Prod](https://github.com/gxobst/handover-copilot/actions/workflows/promote-prod.yml/badge.svg)](https://github.com/gxobst/handover-copilot/actions/workflows/promote-prod.yml)
 [![Backend Tests](https://img.shields.io/badge/backend%20tests-238%20passed-brightgreen)](file:///E:/Project/AI%20Dev%20Tools%20Zoomcamp/shift-handover-copilot/backend/tests)
 [![Frontend Tests](https://img.shields.io/badge/frontend%20tests-324%20passed-brightgreen)](file:///E:/Project/AI%20Dev%20Tools%20Zoomcamp/shift-handover-copilot/frontend)
+[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Correlated%20Telemetry-9333ea)](https://opentelemetry.io/)
+[![Google Cloud](https://img.shields.io/badge/GCP-Cloud%20Run%20%7C%20Vertex%20AI-4285F4)](https://cloud.google.com/)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
 [![React](https://img.shields.io/badge/react-18.3-61dafb)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -14,6 +16,9 @@
 ---
 
 ## ⚡ 5-Minute Reviewer Path
+
+> [!TIP]
+> **Zero Idle Cost Architecture:** Both Dev and Prod environments run on Google Cloud Run configured with `min-instances=0`. If waking up after idle dormancy, the very first request may take ~15s while the Cloud Run instance and AlloyDB connection pool initialize. Subsequent requests respond in sub-second latency.
 
 If you are evaluating this repository, start here:
 
@@ -33,6 +38,9 @@ If you are evaluating this repository, start here:
 
 ## 📖 What is this Project?
 
+> [!NOTE]
+> **Deterministic Offline Development:** The entire application and all 238 backend tests can run 100% offline with zero cloud credentials by setting `LLM_BACKEND=fake` and using local SQLite.
+
 ### The Problem
 During shift transitions in manufacturing plants (early, late, and night shifts), outgoing operators routinely communicate equipment status, safety events, and quality checks through fragmented paper logs, whiteboard notes, or quick verbal handovers. Critical context gets dropped:
 - Maintenance actions are forgotten or unassigned.
@@ -46,6 +54,20 @@ During shift transitions in manufacturing plants (early, late, and night shifts)
 3. **Complete Observability as Code:** OpenTelemetry instrumented with full W3C trace propagation, structured JSON logging, and metric dimensions, paired with a dedicated Prometheus, Loki, Tempo, and Grafana stack.
 4. **Actionable User-Impact Alerting:** Alerts trigger on actual user pain (e.g. report generation failure rate > 20%), not arbitrary server CPU spikes.
 5. **Autonomous On-Call Responder:** An alert polling daemon queries Prometheus and dispatches a headless coding agent configured with an on-call system prompt to investigate, reproduce, fix, verify with tests, and commit code corrections.
+
+---
+
+## 📸 Visual Walkthrough & Production UI
+
+Experience the production-ready user interface designed for high-contrast manufacturing plant floors:
+
+| Shift Event Logging & Live Timeline | AI-Synthesized Handover Report |
+| :---: | :---: |
+| ![Shift Event Logging](assets/screenshots/01_initial_dashboard.png)<br><sub>**Figure 1:** High-contrast shift dashboard showing active date/shift selector, real-time event feed, and category badges.</sub> | ![AI Handover Report](assets/screenshots/05_report_view.png)<br><sub>**Figure 2:** Deterministic Gemini handover synthesis displaying Executive Summary, prioritized Open Actions, and Safety Notes.</sub> |
+
+| Dynamic Model Administration & Fallback | Complete End-to-End Handover Cycle |
+| :---: | :---: |
+| ![Admin Model Controls](assets/screenshots/08_admin_modal_unlocked.png)<br><sub>**Figure 3:** Runtime admin modal enabling immediate hot-swapping between `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite`.</sub> | ![Full E2E Verification](assets/screenshots/10_final_e2e_verified.png)<br><sub>**Figure 4:** Verified end-to-end operation with shift history archive, version increments, and telemetry metrics.</sub> |
 
 ---
 
@@ -63,37 +85,44 @@ During shift transitions in manufacturing plants (early, late, and night shifts)
 
 ```mermaid
 flowchart TD
+    classDef clientTier fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1;
+    classDef cloudRunTier fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+    classDef appTier fill:#ccfbf1,stroke:#0d9488,stroke-width:2px,color:#134e4a;
+    classDef dataTier fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+    classDef obsTier fill:#ffe4e6,stroke:#e11d48,stroke-width:2px,color:#881337;
+    classDef agentTier fill:#fae8ff,stroke:#c026d3,stroke-width:2px,color:#701a75;
+
     subgraph Clients["Users & Operators"]
-        Operator["Machine Operator\n(Log Shift Events)"]
-        Lead["Shift Lead\n(Generate & Review Handover)"]
+        Operator["Machine Operator\n(Log Shift Events)"]:::clientTier
+        Lead["Shift Lead\n(Generate & Review Handover)"]:::clientTier
     end
 
     subgraph GCP["Google Cloud Platform (europe-west2)"]
         subgraph CloudRun["Cloud Run (Scale-to-Zero)"]
-            DevApp["handover-dev\n(Development)"]
-            ProdApp["handover-prod\n(Production)"]
+            DevApp["handover-dev\n(Development)"]:::cloudRunTier
+            ProdApp["handover-prod\n(Production)"]:::cloudRunTier
         end
 
         subgraph Container["Unified Application Container (FastAPI + React)"]
-            Frontend["React 18 + Vite UI\n(Industrial High-Contrast UX)"]
-            API["FastAPI REST API\n(/api/events, /api/reports)"]
-            TelemetryMW["Telemetry Middleware\n(W3C Tracing & PII Redaction)"]
+            Frontend["React 18 + Vite UI\n(Industrial High-Contrast UX)"]:::appTier
+            API["FastAPI REST API\n(/api/events, /api/reports)"]:::appTier
+            TelemetryMW["Telemetry Middleware\n(W3C Tracing & PII Redaction)"]:::appTier
             Frontend <--> API
             API --- TelemetryMW
         end
 
         subgraph Storage["Databases & Foundation Models"]
-            AlloyDB[("AlloyDB PostgreSQL 18\n(Direct VPC Egress / PSC)")]
-            VertexAI["Google Vertex AI\nPrimary: gemini-3.5-flash-lite\nFallback: gemini-3.1-flash-lite"]
+            AlloyDB[("AlloyDB PostgreSQL 18\n(Direct VPC Egress / PSC)")]:::dataTier
+            VertexAI["Google Vertex AI\nPrimary: gemini-3.5-flash-lite\nFallback: gemini-3.1-flash-lite"]:::dataTier
         end
     end
 
     subgraph ObservabilityVM["Observability Host (handover-observability VM)"]
-        OTelCol["OpenTelemetry Collector\n(OTLP / Ports 4317, 4318)"]
-        Prometheus[("Prometheus TSDB\n(Alert Rules & Metrics)")]
-        Loki[("Loki (Logs)")]
-        Tempo[("Tempo (Traces)")]
-        Grafana["Grafana Dashboards\n(Bidirectional Metric & Trace Links)"]
+        OTelCol["OpenTelemetry Collector\n(OTLP / Ports 4317, 4318)"]:::obsTier
+        Prometheus[("Prometheus TSDB\n(Alert Rules & Metrics)")]:::obsTier
+        Loki[("Loki (Logs)")]:::obsTier
+        Tempo[("Tempo (Traces)")]:::obsTier
+        Grafana["Grafana Dashboards\n(Bidirectional Metric & Trace Links)"]:::obsTier
 
         OTelCol --> Prometheus
         OTelCol --> Loki
@@ -104,8 +133,8 @@ flowchart TD
     end
 
     subgraph OnCall["Autonomous On-Call Incident Responder"]
-        Poller["Alert Poller Daemon (on-call-engineer)\nPolls /api/v1/alerts every 60s"]
-        Agent["Headless Coding Agent (Gemini Model)\nInvestigate -> Reproduce -> Fix -> Test -> Commit"]
+        Poller["Alert Poller Daemon (on-call-engineer)\nPolls /api/v1/alerts every 60s"]:::agentTier
+        Agent["Headless Coding Agent (Gemini Model)\nInvestigate -> Reproduce -> Fix -> Test -> Commit"]:::agentTier
 
         Prometheus -. "Firing Alert" .-> Poller
         Poller ==> Agent
@@ -291,6 +320,9 @@ python scripts/verify_deployed_observability.py
 
 ## 🚨 Incident Simulation & Autonomous On-Call Response
 
+> [!IMPORTANT]
+> **Deterministic On-Call Protocol:** The on-call agent operates under an immutable runbook contract. It must reproduce the incident failure, execute minimal surgical remediation, verify that all 238 unit tests pass cleanly, and commit the fix referencing the incident issue.
+
 A realistic operational bug was deliberately introduced into the codebase to validate alerting and autonomous response:
 
 ### 1. The Incident Bug
@@ -298,12 +330,13 @@ In [`backend/app/services/handover.py`](file:///E:/Project/AI%20Dev%20Tools%20Zo
 ```python
 def _normalize_report_content(self, content: ReportContent) -> ReportContent:
     """Normalize generated report content by cleaning markdown heading artifacts."""
-    content.summary = content.summary.remove_prefix("# ").strip()  # BUG: remove_prefix instead of removeprefix
+    content.summary = content.summary.removeprefix("# ").strip()  # RESOLVED: corrected typo from remove_prefix
     return content
 ```
 - **Error:** In Python, standard library `str` has `removeprefix()`, not `remove_prefix()`.
-- **Consequence:** Report generation crashes with `AttributeError` on both active and fallback models, returning `502 Bad Gateway` and incrementing `handover_reports_generated_total{outcome="error"}`.
-- **Alert:** Prometheus triggers `HandoverGenerationFailureRateHigh` (critical).
+- **Consequence:** Prior to resolution, report generation crashed with `AttributeError` on both active and fallback models, returning `502 Bad Gateway` and incrementing `handover_reports_generated_total{outcome="error"}`.
+- **Alert:** Prometheus triggered `HandoverGenerationFailureRateHigh` (critical).
+- **Autonomous Resolution:** The on-call daemon detected the alert, dispatched the coding agent, surgically applied `removeprefix`, verified with `pytest` (238 passed), and pushed to `main`, restoring CI/CD and production promotion workflows to green.
 
 ### 2. One-Command Reproduction & Verification
 We provide a reproduction script that executes the failure and simulates the on-call detection:
@@ -338,7 +371,18 @@ The agent inspects the code, runs `uv run pytest tests/test_generation.py`, fixe
 
 ## 💰 Cloud Cost & Architecture ($0/Month Idle)
 
-A core design principle of Shift Handover Copilot is **strict zero-idle budget adherence**:
+> [!NOTE]
+> **FinOps Engineered for Zero Waste:** By combining scale-to-zero serverless containers on Google Cloud Run with pay-per-token Vertex AI Gemini models and ephemeral database migration jobs, baseline idle cost is mathematically $0.00.
+
+| Infrastructure Component | Service | Sizing / Configuration | Idle Cost | Active Operational Cost |
+|---|---|---|---|---|
+| **Web & API Compute** | Google Cloud Run | `min-instances=0`, `max-instances=3`, 512MiB | **$0.00 / month** | ~$0.000024 / vCPU-second |
+| **Generative AI** | Google Vertex AI | `gemini-3.5-flash-lite` primary / `3.1` fallback | **$0.00 / month** | ~$0.075 / 1M input tokens |
+| **Relational Database** | AlloyDB for PostgreSQL | Highly available PostgreSQL 18 with PSC | Shared cluster | Standard compute & storage |
+| **Telemetry & Metrics** | GCE e2-small VM | OTel Collector, Prometheus, Loki, Tempo, Grafana | Fixed dev instance | ~$14.00 / month |
+| **CI/CD & Workload Identity** | GitHub Actions | Keyless WIF authentication, automated promotion | Free tier | $0.00 |
+
+### Architecture Principles
 - **Compute:** Cloud Run services (`handover-dev`, `handover-prod`, `handover-relay`) configure `min-instances=0`. When idle, compute scales completely to zero ($0.00).
 - **Database:** Google Cloud AlloyDB for PostgreSQL 18 in `europe-west2` with Private Service Connect (PSC).
 - **AI Models:** Vertex AI pay-per-token pricing (`gemini-3.5-flash-lite` at ~$0.075 / 1M input tokens). Idle cost is exactly $0.
@@ -355,11 +399,17 @@ This repository was planned, built, tested, and maintained by an autonomous agen
 
 ```mermaid
 flowchart TD
-    UserReq["User Request / Raw Feature"] --> PM["Product Manager Subagent\n(Groom issue using _docs/task-template.md)"]
-    PM -->|Groomed Issue: Goal, AC, Out of Scope, Constraints| SWE["Software Engineer Subagent\n(Implement code + tests, commit referencing #issue)"]
-    SWE -->|Implementation Summary Comment| QA["QA Engineer Subagent\n(Fresh session, test running system against ACs)"]
+    classDef userNode fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#334155;
+    classDef pmNode fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+    classDef sweNode fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1;
+    classDef qaNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d;
+    classDef orchNode fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+
+    UserReq["User Request / Raw Feature"]:::userNode --> PM["Product Manager Subagent\n(Groom issue using _docs/task-template.md)"]:::pmNode
+    PM -->|Groomed Issue: Goal, AC, Out of Scope, Constraints| SWE["Software Engineer Subagent\n(Implement code + tests, commit referencing #issue)"]:::sweNode
+    SWE -->|Implementation Summary Comment| QA["QA Engineer Subagent\n(Fresh session, test running system against ACs)"]:::qaNode
     QA -->|Verdict: ## QA: FAIL| SWE
-    QA -->|Verdict: ## QA: PASS| Orch["Orchestrator\n(Close GitHub Issue & update plan.md)"]
+    QA -->|Verdict: ## QA: PASS| Orch["Orchestrator\n(Close GitHub Issue & update plan.md)"]:::orchNode
 ```
 
 Review the [GitHub Issues Backlog](https://github.com/gxobst/handover-copilot/issues?q=is%3Aissue+is%3Aclosed) to inspect the public record of PM grooming, SWE commits, and QA verdict comments across all 39 delivered issues.

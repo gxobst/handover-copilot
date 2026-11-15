@@ -8,30 +8,38 @@ The `on-call-engineer` package provides an autonomous daemon that continuously m
 
 ```mermaid
 flowchart TD
+    classDef alertSource fill:#ffe4e6,stroke:#e11d48,stroke-width:2px,color:#881337;
+    classDef pollerStage fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1;
+    classDef decisionNode fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+    classDef dispatchStage fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8;
+    classDef agentStage fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d;
+    classDef skipNode fill:#f1f5f9,stroke:#64748b,stroke-width:1px,stroke-dasharray: 4 4,color:#334155;
+
     subgraph Prometheus["Observability Alerts Source"]
-        AlertsAPI["Prometheus Alert API (/api/v1/alerts)\n(or Alertmanager / Mock Fixture)"]
+        AlertsAPI["Prometheus Alert API (/api/v1/alerts)\n(or Alertmanager / Mock Fixture)"]:::alertSource
     end
 
     subgraph Poller["Alert Poller Daemon (poller.py)"]
-        Tick["Timer Tick (every 60s)"]
-        Query["Fetch & Parse Active Alerts"]
-        Filter{"Alert State == 'firing'?"}
-        Dedupe{"In-Flight or\nWithin Cooldown Window?"}
-        Track["Update Tracked Alert State\n(Fingerprint, Active Timestamp)"]
+        Tick["Timer Tick (every 60s)"]:::pollerStage
+        Query["Fetch & Parse Active Alerts"]:::pollerStage
+        Filter{"Alert State == 'firing'?"}:::decisionNode
+        Dedupe{"In-Flight or\nWithin Cooldown Window?"}:::decisionNode
+        Track["Update Tracked Alert State\n(Fingerprint, Active Timestamp)"]:::pollerStage
+        LogDrop["Log Duplicate & Skip"]:::skipNode
 
         Tick --> Query
         Query --> Filter
         Filter -- Yes --> Dedupe
         Filter -- "No / Resolved" --> Track
         Dedupe -- "New / Cooldown Expired" --> Track
-        Dedupe -- "Duplicate (Active)" --> LogDrop["Log Duplicate & Skip"]
+        Dedupe -- "Duplicate (Active)" --> LogDrop
     end
 
     subgraph Dispatcher["Agent Dispatcher (dispatcher.py)"]
-        Assemble["Assemble Full Prompt:\n- Verbatim On-Call System Prompt\n- Structured Incident Telemetry Context\n- JSON Alert Payload"]
-        ExecMode{"Dry Run Mode?"}
-        Simulate["Log Simulated Execution (Exit 0)"]
-        Execute["Spawn Headless Coding Agent\n(e.g. Gemini / LLM Subprocess)"]
+        Assemble["Assemble Full Prompt:\n- Verbatim On-Call System Prompt\n- Structured Incident Telemetry Context\n- JSON Alert Payload"]:::dispatchStage
+        ExecMode{"Dry Run Mode?"}:::decisionNode
+        Simulate["Log Simulated Execution (Exit 0)"]:::skipNode
+        Execute["Spawn Headless Coding Agent\n(e.g. agy / Gemini / Subprocess)"]:::dispatchStage
 
         Track ==> Assemble
         Assemble --> ExecMode
@@ -40,11 +48,11 @@ flowchart TD
     end
 
     subgraph Agent["Autonomous On-Call Engineer"]
-        Investigate["1. Investigate Root Cause & Read Code"]
-        Reproduce["2. Reproduce Incident Failure with Tests"]
-        Fix["3. Make Smallest Code Correction"]
-        Verify["4. Run Backend Tests to Verify"]
-        Commit["5. Commit Fix or Document False Positive"]
+        Investigate["1. Investigate Root Cause & Read Code"]:::agentStage
+        Reproduce["2. Reproduce Incident Failure with Tests"]:::agentStage
+        Fix["3. Make Smallest Code Correction"]:::agentStage
+        Verify["4. Run Backend Tests to Verify"]:::agentStage
+        Commit["5. Commit Fix or Document False Positive"]:::agentStage
 
         Execute ==> Investigate
         Investigate --> Reproduce
@@ -53,7 +61,7 @@ flowchart TD
         Verify --> Commit
     end
 
-    AlertsAPI -. Polled Response .-> Query
+    AlertsAPI -. "Polled Response (JSON)" .-> Query
 ```
 
 ---
@@ -85,6 +93,9 @@ on-call-engineer/
 ---
 
 ## Mandatory On-Call System Prompt
+
+> [!IMPORTANT]
+> The on-call dispatcher injects an immutable, contract-governed system prompt into the dispatched coding agent. The agent must reproduce the incident, make the minimal code fix, verify with tests, and commit with a descriptive message.
 
 Whenever an incident triggers an agent dispatch, the dispatched process receives the exact verbatim system prompt required by the on-call runbook:
 
@@ -134,6 +145,9 @@ In addition to the verbatim system prompt, the agent receives structured inciden
 ---
 
 ## Deduplication & Cooldown Mechanism
+
+> [!TIP]
+> The default cooldown window is 15 minutes (`ALERT_COOLDOWN_SECONDS=900`). If an incident persists while an agent is actively working, the in-flight lock guarantees zero redundant agent processes are spawned.
 
 To prevent infinite dispatch loops while an alert remains in `firing` state across consecutive polling cycles:
 1. **Fingerprint Tracking:** Each alert is identified by its monitoring system `fingerprint` or a deterministic SHA-256 hash derived from `alertname` and sorted key labels.
