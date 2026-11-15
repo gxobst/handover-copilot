@@ -83,7 +83,7 @@ class HandoverService:
 
     def _normalize_report_content(self, content: ReportContent) -> ReportContent:
         """Normalize generated report content by cleaning markdown heading artifacts."""
-        content.summary = content.summary.remove_prefix("# ").strip()
+        content.summary = content.summary.removeprefix("# ").strip()
         return content
 
     def generate_report(self, shift_key: str) -> ReportResponse:
