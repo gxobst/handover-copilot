@@ -13,6 +13,7 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app:${IMAGE_TAG}"
 # Target job can be specified via env var or 1st arg: "dev", "prod", or "all" (default)
 TARGET_JOB="${1:-${MIGRATE_TARGET:-all}}"
+RUNTIME_EMAIL="${RUNTIME_EMAIL:-${RUNTIME_SERVICE_ACCOUNT:-handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com}}"
 
 provision_job() {
   local job_name="$1"

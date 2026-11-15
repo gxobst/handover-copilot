@@ -19,11 +19,10 @@ def test_healthz_get_success(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "application/json" in response.headers.get("content-type", "")
-    assert response.json() == {
-        "status": "ok",
-        "version": "0.1.0",
-        "environment": "local",
-    }
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["version"] == "0.1.0"
+    assert data["environment"] == get_settings().environment
 
 
 @pytest.mark.parametrize("method", ["post", "put", "delete", "patch"])

@@ -67,6 +67,7 @@ jobs:
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
           GCP_PROJECT: ${{ env.PROJECT_ID }}
           GCP_REGION: ${{ env.REGION }}
+          RUNTIME_EMAIL: ${{ env.RUNTIME_SERVICE_ACCOUNT }}
         run: |
           chmod +x ./infra/06-cloud-run-migrate-job.sh
           ./infra/06-cloud-run-migrate-job.sh dev
