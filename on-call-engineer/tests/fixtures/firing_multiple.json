@@ -1,0 +1,45 @@
+{
+  "status": "success",
+  "data": {
+    "alerts": [
+      {
+        "labels": {
+          "alertname": "HandoverGenerationFailureRateHigh",
+          "service": "handover-backend",
+          "environment": "prod",
+          "version": "v1.2.3",
+          "severity": "critical",
+          "owner": "shift-operations"
+        },
+        "annotations": {
+          "summary": "High report generation failure rate in prod",
+          "description": "Shift leads cannot generate handovers in environment prod (version v1.2.3) — the incoming shift starts blind.",
+          "dashboard_url": "http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment=prod&var-version=v1.2.3",
+          "runbook_url": "https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md"
+        },
+        "state": "firing",
+        "activeAt": "2026-11-15T18:00:00Z",
+        "value": "0.35"
+      },
+      {
+        "labels": {
+          "alertname": "HandoverHttpErrorRateHigh",
+          "service": "handover-backend",
+          "environment": "prod",
+          "version": "v1.2.3",
+          "severity": "warning",
+          "owner": "shift-operations"
+        },
+        "annotations": {
+          "summary": "High HTTP 5xx server error rate in prod",
+          "description": "Over 10% of HTTP requests to service handover-backend in prod (version v1.2.3) are returning 5xx server errors.",
+          "dashboard_url": "http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment=prod&var-version=v1.2.3",
+          "runbook_url": "https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md"
+        },
+        "state": "firing",
+        "activeAt": "2026-11-15T18:02:00Z",
+        "value": "0.15"
+      }
+    ]
+  }
+}

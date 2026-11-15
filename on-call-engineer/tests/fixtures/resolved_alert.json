@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "data": {
+    "alerts": [
+      {
+        "labels": {
+          "alertname": "HandoverGenerationFailureRateHigh",
+          "service": "handover-backend",
+          "environment": "prod",
+          "version": "v1.2.3",
+          "severity": "critical",
+          "owner": "shift-operations"
+        },
+        "annotations": {
+          "summary": "High report generation failure rate in prod",
+          "description": "Shift leads cannot generate handovers in environment prod (version v1.2.3) — the incoming shift starts blind."
+        },
+        "state": "resolved",
+        "activeAt": "2026-11-15T18:00:00Z",
+        "value": "0.0"
+      }
+    ]
+  }
+}
