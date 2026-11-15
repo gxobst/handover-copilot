@@ -782,3 +782,31 @@ When running in Docker or standalone production deployments where FastAPI direct
 4. **Frontend Defensive Normalization**:
    - `eventsApi.ts`, `reportsApi.ts`, and `adminApi.ts` normalize response payloads to ensure safe property access in both development (mock/proxy) and production (Docker direct).
 
+---
+
+## 14. Docker Compose & Integration Test Suite Architecture (Issue #24)
+
+### Decision Context
+To enable deterministic local evaluation, production-grade container orchestration, and automated verification of end-to-end deployment behaviors without cloud dependencies or manual intervention, `docker-compose.yaml` and a 7-scenario integration test suite were introduced.
+
+### Architecture & Resolution
+1. **Compose v2 Specification (`docker-compose.yaml`)**:
+   - Service `app` built from `./Dockerfile` with standard port binding `${PORT:-8000}:8000`.
+   - Environment defaults configured for zero-cost offline validation: `APP_ENV=production`, `LLM_BACKEND=fake`, `ADMIN_TOKEN=dev-admin-secret-key-12345`, `RELAY_WEBHOOK_TOKEN=dev-relay-token-secret-123`, `DATABASE_URL=sqlite:///./data/handover.db`.
+   - Named Docker volume `handover_data:/app/data` mounted to `/app/data` ensuring SQLite persistence across container lifecycle events (stop/start/restart/recreate).
+   - Container healthcheck configured via Python standard library `urllib.request` (`python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz')"`) transitioning container to `healthy` state in environments lacking `curl`.
+2. **Database Directory Auto-Creation**:
+   - Ensured `/app/data` directory creation in `Dockerfile`, `backend/app/db/session.py`, and `backend/alembic/env.py` so SQLite connection initialization never fails on clean volumes.
+3. **Automated Integration Test Suite**:
+   - Implemented in `scripts/test_compose_integration.py` (standalone zero-dependency runner) and `backend/tests/test_compose_scenarios.py` (pytest-compatible suite) validating 7 core deployment scenarios:
+     - **Scenario 1:** Container boot & static SPA serving (`/api/healthz`, `/` HTML with `<div id="root">`, `/assets/*` bundles, `/reports` and `/reports/:id` SPA routing, `/docs` Swagger UI, `/openapi.json`).
+     - **Scenario 2:** Shift events lifecycle & dual-naming compatibility (`POST /api/events` with camelCase/snake_case, `GET /api/events` with `shiftKey`/`shift_key`, 422 ProblemDetails with `traceId`, 204 deletion).
+     - **Scenario 3:** Handover report generation & zero-omission gate (422 ProblemDetails on empty shift, 201 generation with executive summary, safety notes, open actions, event count matching, and `X-Trace-ID` header).
+     - **Scenario 4:** Version progression & report history (increment to version 2 on new event, descending history list, immutable version 1 snapshot).
+     - **Scenario 5:** Dynamic model settings & admin security (401 without Bearer token, GET settings with dual-naming keys, PUT runtime reconfiguration without restart).
+     - **Scenario 6:** Database persistence across container restart (`docker compose restart app`, verifying events, reports, snapshots, and updated settings persist).
+     - **Scenario 7:** Webhook relay module & incident ingestion (401 on missing/invalid token, 422 on malformed body, non-firing alert ignored, deduplication of firing alerts within cooldown window, incident event creation in shift log).
+4. **Automated Orchestration Runners**:
+   - `scripts/run-integration-tests.ps1` (Windows PowerShell) and `scripts/run-integration-tests.sh` (POSIX bash) automate building stack via `docker compose up -d --build`, waiting for healthy status, executing test scenarios, testing persistence across restart, and clean teardown via `docker compose down -v`.
+
+
