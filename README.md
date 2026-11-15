@@ -276,6 +276,11 @@ Key runtime environment variables configured across local and cloud environments
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty)* | OTLP collector address (e.g. `http://10.154.0.3:4318`). Defaults to in-memory reader when unset. |
 | `ALERT_API_URL` | `http://34.153.185.34:9090/api/v1/alerts` | Prometheus alert endpoint monitored by on-call daemon. |
 | `ADMIN_TOKEN` | `dev-admin-secret-key-12345` | Bearer token required for `PUT /api/admin/settings`. |
+| `RATE_LIMIT_ENABLED` | `true` | Enable in-memory rate limiting and generation caps on report generation. |
+| `RATE_LIMIT_WINDOW_SECONDS` | `600` | Sliding window duration in seconds for per-client rate limiting (10 minutes). |
+| `RATE_LIMIT_MAX_REQUESTS` | `5` | Maximum allowed report generation requests per client IP within sliding window. |
+| `RATE_LIMIT_USER_LIFETIME_CAP` | `20` | Hard lifetime report generation ceiling per client IP (no time limit). |
+| `RATE_LIMIT_GLOBAL_CAP` | `20` | Hard service-wide global report generation ceiling across all users (no time limit). |
 
 ---
 
@@ -283,7 +288,7 @@ Key runtime environment variables configured across local and cloud environments
 
 Every layer of Shift Handover Copilot is covered by automated test suites that run in CI on every push and PR:
 
-### 1. Run Backend Tests (238 Passed)
+### 1. Run Backend Tests (253 Passed)
 Fast, deterministic test suite utilizing in-memory doubles (`LLM_BACKEND=fake`) with zero cloud spend:
 ```bash
 cd backend
@@ -385,7 +390,12 @@ The agent inspects the code, runs `uv run pytest tests/test_generation.py`, fixe
 ### Architecture Principles
 - **Compute:** Cloud Run services (`handover-dev`, `handover-prod`, `handover-relay`) configure `min-instances=0`. When idle, compute scales completely to zero ($0.00).
 - **Database:** Google Cloud AlloyDB for PostgreSQL 18 in `europe-west2` with Private Service Connect (PSC).
-- **AI Models:** Vertex AI pay-per-token pricing (`gemini-3.5-flash-lite` at ~$0.075 / 1M input tokens). Idle cost is exactly $0.
+- **AI Models & Abuse Guards (Issue #41):** Vertex AI pay-per-token pricing (`gemini-3.5-flash-lite` at ~$0.075 / 1M input tokens). Idle cost is exactly $0. To protect against runaway cloud spend on public demo deployments:
+  - **Per-User Rate Limit:** Max 5 report generations per 10 minutes per client IP via sliding window.
+  - **Per-User Lifetime Cap:** Hard ceiling of 20 total report generations per client IP (no time limit).
+  - **Global Budget Ceiling:** Hard service-wide cap of 20 total report generations across all users (no time limit).
+  - **Strict Universal Enforcement:** No admin token bypass (all incoming requests to `POST /api/reports/generate` are subject to identical caps).
+  - **Strict Admin Model Allowlist:** Dynamic model administration (`PUT /api/admin/settings`) is strictly restricted to `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` (with or without `google/` prefix), rejecting arbitrary models with HTTP 422.
 - **Observability:** Centralized on an e2-small VM (`handover-observability`, internal IP `10.154.0.3`, external IP `34.153.185.34`) running Prometheus, Loki, Tempo, and Grafana in Docker.
 - **CI/CD:** Automated via GitHub Actions with Workload Identity Federation (WIF) — no stored service account keys.
   - Push to `main` triggers `.github/workflows/gcp-pipeline.yml` (builds image, runs migrations, deploys to `dev`).

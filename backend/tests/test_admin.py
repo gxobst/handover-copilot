@@ -7,7 +7,7 @@ Covers Issue #8 acceptance criteria:
 - GET /api/admin/settings returns current active and fallback models
 - PUT /api/admin/settings updates active_model, fallback_model, or both
 - Validation: 422 ProblemDetails on empty payload {}, null, empty string, whitespace, invalid pattern
-- Model validation is strictly pattern-based (non-empty string matching ^[a-zA-Z0-9._-]+$), accepts retired models (gemini-2.5-flash-lite)
+- Model validation strictly enforces the 2-model allowlist (gemini-3.5-flash-lite and gemini-3.1-flash-lite), rejecting retired models (gemini-2.5-flash-lite) or arbitrary models with HTTP 422
 - Immediate read-after-write (AC-10) without server restart or caching delay
 - End-to-end report generation immediately honors runtime admin updates
 - Unit tests for settings_store functions and require_admin_token dependency
@@ -172,7 +172,7 @@ def test_put_settings_missing_auth_header(client: TestClient) -> None:
     """PUT /api/admin/settings without Authorization returns 401 ProblemDetails."""
     response = client.put(
         "/api/admin/settings",
-        json={"active_model": "gemini-3.5-flash"},
+        json={"active_model": "gemini-3.5-flash-lite"},
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert response.headers["content-type"].startswith("application/problem+json")
@@ -186,7 +186,7 @@ def test_put_settings_invalid_token(client: TestClient) -> None:
     response = client.put(
         "/api/admin/settings",
         headers={"Authorization": "Bearer invalid-key"},
-        json={"active_model": "gemini-3.5-flash"},
+        json={"active_model": "gemini-3.5-flash-lite"},
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert response.headers["content-type"].startswith("application/problem+json")
@@ -325,7 +325,7 @@ def test_put_settings_extra_forbidden_fields(client: TestClient) -> None:
     response = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-3.5-flash", "unexpected": "value"},
+        json={"active_model": "gemini-3.5-flash-lite", "unexpected": "value"},
     )
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     problem = ProblemDetails.model_validate(response.json())
@@ -342,20 +342,20 @@ def test_put_settings_update_active_model_only(client: TestClient, db_session: S
     response = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-3.5-flash"},
+        json={"active_model": "gemini-3.1-flash-lite"},
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
-        "active_model": "gemini-3.5-flash",
+        "active_model": "gemini-3.1-flash-lite",
         "fallback_model": "google/gemini-3.1-flash-lite",
-        "activeModel": "gemini-3.5-flash",
+        "activeModel": "gemini-3.1-flash-lite",
         "fallbackModel": "google/gemini-3.1-flash-lite",
     }
 
     # Verify persistence in DB
     row = db_session.get(AppSetting, SETTING_ACTIVE_MODEL)
     assert row is not None
-    assert row.value == "gemini-3.5-flash"
+    assert row.value == "gemini-3.1-flash-lite"
 
 
 def test_put_settings_update_fallback_model_only(client: TestClient, db_session: Session) -> None:
@@ -363,20 +363,20 @@ def test_put_settings_update_fallback_model_only(client: TestClient, db_session:
     response = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"fallback_model": "gemini-3.5-flash"},
+        json={"fallback_model": "gemini-3.5-flash-lite"},
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
         "active_model": "google/gemini-3.5-flash-lite",
-        "fallback_model": "gemini-3.5-flash",
+        "fallback_model": "gemini-3.5-flash-lite",
         "activeModel": "google/gemini-3.5-flash-lite",
-        "fallbackModel": "gemini-3.5-flash",
+        "fallbackModel": "gemini-3.5-flash-lite",
     }
 
     # Verify persistence in DB
     row = db_session.get(AppSetting, SETTING_FALLBACK_MODEL)
     assert row is not None
-    assert row.value == "gemini-3.5-flash"
+    assert row.value == "gemini-3.5-flash-lite"
 
 
 def test_put_settings_update_both_models(client: TestClient, db_session: Session) -> None:
@@ -385,31 +385,44 @@ def test_put_settings_update_both_models(client: TestClient, db_session: Session
         "/api/admin/settings",
         headers=AUTH_HEADER,
         json={
-            "active_model": "gemini-4-argon",
+            "active_model": "gemini-3.1-flash-lite",
             "fallback_model": "gemini-3.5-flash-lite",
         },
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
-        "active_model": "gemini-4-argon",
+        "active_model": "gemini-3.1-flash-lite",
         "fallback_model": "gemini-3.5-flash-lite",
-        "activeModel": "gemini-4-argon",
+        "activeModel": "gemini-3.1-flash-lite",
         "fallbackModel": "gemini-3.5-flash-lite",
     }
 
-    assert db_session.get(AppSetting, SETTING_ACTIVE_MODEL).value == "gemini-4-argon"
+    assert db_session.get(AppSetting, SETTING_ACTIVE_MODEL).value == "gemini-3.1-flash-lite"
     assert db_session.get(AppSetting, SETTING_FALLBACK_MODEL).value == "gemini-3.5-flash-lite"
 
 
-def test_put_settings_accepts_retired_model(client: TestClient) -> None:
-    """Model validation is pattern-only and accepts retired models like gemini-2.5-flash-lite."""
-    response = client.put(
-        "/api/admin/settings",
-        headers=AUTH_HEADER,
-        json={"active_model": "gemini-2.5-flash-lite"},
-    )
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json()["active_model"] == "gemini-2.5-flash-lite"
+def test_put_settings_rejects_disallowed_and_retired_models(client: TestClient) -> None:
+    """Model validation strictly enforces the 2-model allowlist and rejects retired or arbitrary models with 422."""
+    disallowed_models = [
+        "gemini-2.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-4-argon",
+        "gpt-4",
+        "claude-3-opus",
+        "random-unauthorized-model",
+    ]
+    for model_name in disallowed_models:
+        response = client.put(
+            "/api/admin/settings",
+            headers=AUTH_HEADER,
+            json={"active_model": model_name},
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, f"Failed for {model_name}"
+        assert response.headers["content-type"].startswith("application/problem+json")
+        problem = ProblemDetails.model_validate(response.json())
+        assert problem.status == 422
+        assert "gemini-3.5-flash-lite" in problem.detail
+        assert "gemini-3.1-flash-lite" in problem.detail
 
 
 def test_put_settings_trims_whitespace(client: TestClient, db_session: Session) -> None:
@@ -417,11 +430,11 @@ def test_put_settings_trims_whitespace(client: TestClient, db_session: Session) 
     response = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "   gemini-3.5-flash   "},
+        json={"active_model": "   gemini-3.5-flash-lite   "},
     )
     assert response.status_code == status.HTTP_200_OK
-    assert response.json()["active_model"] == "gemini-3.5-flash"
-    assert db_session.get(AppSetting, SETTING_ACTIVE_MODEL).value == "gemini-3.5-flash"
+    assert response.json()["active_model"] == "gemini-3.5-flash-lite"
+    assert db_session.get(AppSetting, SETTING_ACTIVE_MODEL).value == "gemini-3.5-flash-lite"
 
 
 # ---------------------------------------------------------------------------
@@ -435,35 +448,35 @@ def test_immediate_read_after_write(client: TestClient) -> None:
     get1 = client.get("/api/admin/settings", headers=AUTH_HEADER)
     assert get1.json()["active_model"] == "google/gemini-3.5-flash-lite"
 
-    # Update active_model
+    # Update active_model to allowed model
     put_res = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-2.5-flash-lite"},
+        json={"active_model": "gemini-3.1-flash-lite"},
     )
     assert put_res.status_code == status.HTTP_200_OK
 
     # Next GET must immediately return new model without server restart
     get2 = client.get("/api/admin/settings", headers=AUTH_HEADER)
     assert get2.status_code == status.HTTP_200_OK
-    assert get2.json()["active_model"] == "gemini-2.5-flash-lite"
+    assert get2.json()["active_model"] == "gemini-3.1-flash-lite"
     assert get2.json()["fallback_model"] == "google/gemini-3.1-flash-lite"
 
-    # Update fallback_model
+    # Update fallback_model to allowed model
     put_res2 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"fallback_model": "gemini-3.5-flash"},
+        json={"fallback_model": "google/gemini-3.5-flash-lite"},
     )
     assert put_res2.status_code == status.HTTP_200_OK
 
     # Next GET reflects both updates
     get3 = client.get("/api/admin/settings", headers=AUTH_HEADER)
     assert get3.json() == {
-        "active_model": "gemini-2.5-flash-lite",
-        "fallback_model": "gemini-3.5-flash",
-        "activeModel": "gemini-2.5-flash-lite",
-        "fallbackModel": "gemini-3.5-flash",
+        "active_model": "gemini-3.1-flash-lite",
+        "fallback_model": "google/gemini-3.5-flash-lite",
+        "activeModel": "gemini-3.1-flash-lite",
+        "fallbackModel": "google/gemini-3.5-flash-lite",
     }
 
 
@@ -480,12 +493,12 @@ def test_report_generation_honors_dynamic_admin_updates_immediately(
 
     Scenario:
     1. Seed shift events in the database.
-    2. Generate report with default active_model (gemini-3.5-flash-lite) -> succeeds with primary.
-    3. Admin PUT updates active_model to retired model (gemini-2.5-flash-lite).
-    4. Next report generation immediately attempts gemini-2.5-flash-lite, fails (ModelNotFound in FakeLLMClient),
-       falls back to gemini-3.1-flash-lite, and succeeds with model_used="gemini-3.1-flash-lite".
-    5. Admin PUT updates active_model to supported model (gemini-3.5-flash).
-    6. Next report generation succeeds with primary model_used="gemini-3.5-flash".
+    2. Generate report with default active_model (google/gemini-3.5-flash-lite) -> succeeds with primary.
+    3. Admin PUT swaps active_model to gemini-3.1-flash-lite and fallback_model to gemini-3.5-flash-lite.
+    4. Next report generation immediately uses new setting -> model_used="gemini-3.1-flash-lite".
+    5. Admin PUT swaps active_model back to google/gemini-3.5-flash-lite.
+    6. Next report generation succeeds with primary model_used="google/gemini-3.5-flash-lite".
+    7. Admin attempts to set unauthorized model (gemini-2.5-flash-lite) -> rejected with HTTP 422.
     """
     shift_key = "2026-11-14-early"
 
@@ -508,37 +521,52 @@ def test_report_generation_honors_dynamic_admin_updates_immediately(
     assert report1["version"] == 1
     assert report1["model_used"] == "google/gemini-3.5-flash-lite"
 
-    # Step 3: Admin reconfigures active_model to retired model gemini-2.5-flash-lite
+    # Step 3: Admin reconfigures active_model to gemini-3.1-flash-lite
     admin_put = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-2.5-flash-lite"},
+        json={
+            "active_model": "gemini-3.1-flash-lite",
+            "fallback_model": "gemini-3.5-flash-lite",
+        },
     )
     assert admin_put.status_code == status.HTTP_200_OK
-    assert admin_put.json()["active_model"] == "gemini-2.5-flash-lite"
+    assert admin_put.json()["active_model"] == "gemini-3.1-flash-lite"
+    assert admin_put.json()["fallback_model"] == "gemini-3.5-flash-lite"
 
-    # Step 4: Next report generation immediately uses new setting -> fallback to google/gemini-3.1-flash-lite
+    # Step 4: Next report generation immediately uses new setting -> gemini-3.1-flash-lite
     gen_res2 = client.post("/api/reports/generate", json={"shift_key": shift_key})
     assert gen_res2.status_code == status.HTTP_201_CREATED
     report2 = gen_res2.json()
     assert report2["version"] == 2
-    assert report2["model_used"] == "google/gemini-3.1-flash-lite"
+    assert report2["model_used"] == "gemini-3.1-flash-lite"
 
-    # Step 5: Admin restores active_model to another supported model gemini-3.5-flash
+    # Step 5: Admin restores active_model to google/gemini-3.5-flash-lite
     admin_put2 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-3.5-flash"},
+        json={"active_model": "google/gemini-3.5-flash-lite"},
     )
     assert admin_put2.status_code == status.HTTP_200_OK
-    assert admin_put2.json()["active_model"] == "gemini-3.5-flash"
+    assert admin_put2.json()["active_model"] == "google/gemini-3.5-flash-lite"
 
-    # Step 6: Next report generation succeeds with gemini-3.5-flash as primary
+    # Step 6: Next report generation succeeds with google/gemini-3.5-flash-lite as primary
     gen_res3 = client.post("/api/reports/generate", json={"shift_key": shift_key})
     assert gen_res3.status_code == status.HTTP_201_CREATED
     report3 = gen_res3.json()
     assert report3["version"] == 3
-    assert report3["model_used"] == "gemini-3.5-flash"
+    assert report3["model_used"] == "google/gemini-3.5-flash-lite"
+
+    # Step 7: Attempting to configure retired or arbitrary model is rejected with 422
+    admin_put_invalid = client.put(
+        "/api/admin/settings",
+        headers=AUTH_HEADER,
+        json={"active_model": "gemini-2.5-flash-lite"},
+    )
+    assert admin_put_invalid.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    problem = ProblemDetails.model_validate(admin_put_invalid.json())
+    assert problem.status == 422
+    assert "gemini-3.5-flash-lite" in problem.detail
 
 
 # ---------------------------------------------------------------------------
@@ -555,11 +583,11 @@ def test_settings_store_unit_crud(db_session: Session, test_settings: Settings) 
 
     # Update active model
     up1 = update_admin_settings(
-        update=AdminSettingsUpdate(active_model="gemini-4-argon"),
+        update=AdminSettingsUpdate(active_model="gemini-3.1-flash-lite"),
         db=db_session,
         settings=test_settings,
     )
-    assert up1.active_model == "gemini-4-argon"
+    assert up1.active_model == "gemini-3.1-flash-lite"
     assert up1.fallback_model == "google/gemini-3.1-flash-lite"
 
     # Update fallback model
@@ -568,12 +596,12 @@ def test_settings_store_unit_crud(db_session: Session, test_settings: Settings) 
         db=db_session,
         settings=test_settings,
     )
-    assert up2.active_model == "gemini-4-argon"
+    assert up2.active_model == "gemini-3.1-flash-lite"
     assert up2.fallback_model == "gemini-3.5-flash-lite"
 
     # Read returns persisted values
     read = get_admin_settings(db=db_session, settings=test_settings)
-    assert read.active_model == "gemini-4-argon"
+    assert read.active_model == "gemini-3.1-flash-lite"
     assert read.fallback_model == "gemini-3.5-flash-lite"
 
 

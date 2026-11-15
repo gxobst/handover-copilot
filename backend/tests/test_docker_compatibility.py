@@ -289,7 +289,7 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     res1 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"activeModel": "gemini-test-active"},
+        json={"activeModel": "gemini-3.1-flash-lite"},
     )
     assert res1.status_code == status.HTTP_200_OK
     data1 = res1.json()
@@ -297,14 +297,14 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     assert "activeModel" in data1
     assert "fallback_model" in data1
     assert "fallbackModel" in data1
-    assert data1["active_model"] == "gemini-test-active"
-    assert data1["activeModel"] == "gemini-test-active"
+    assert data1["active_model"] == "gemini-3.1-flash-lite"
+    assert data1["activeModel"] == "gemini-3.1-flash-lite"
 
     # Update fallbackModel only
     res2 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"fallbackModel": "gemini-test-fallback"},
+        json={"fallbackModel": "google/gemini-3.5-flash-lite"},
     )
     assert res2.status_code == status.HTTP_200_OK
     data2 = res2.json()
@@ -312,16 +312,16 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     assert "activeModel" in data2
     assert "fallback_model" in data2
     assert "fallbackModel" in data2
-    assert data2["fallback_model"] == "gemini-test-fallback"
-    assert data2["fallbackModel"] == "gemini-test-fallback"
+    assert data2["fallback_model"] == "google/gemini-3.5-flash-lite"
+    assert data2["fallbackModel"] == "google/gemini-3.5-flash-lite"
 
     # Update both simultaneously with camelCase
     res3 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
         json={
-            "activeModel": "gemini-dual-active",
-            "fallbackModel": "gemini-dual-fallback",
+            "activeModel": "google/gemini-3.1-flash-lite",
+            "fallbackModel": "gemini-3.5-flash-lite",
         },
     )
     assert res3.status_code == status.HTTP_200_OK
@@ -330,10 +330,10 @@ def test_admin_settings_put_camel_case(client: TestClient) -> None:
     assert "activeModel" in data3
     assert "fallback_model" in data3
     assert "fallbackModel" in data3
-    assert data3["active_model"] == "gemini-dual-active"
-    assert data3["activeModel"] == "gemini-dual-active"
-    assert data3["fallback_model"] == "gemini-dual-fallback"
-    assert data3["fallbackModel"] == "gemini-dual-fallback"
+    assert data3["active_model"] == "google/gemini-3.1-flash-lite"
+    assert data3["activeModel"] == "google/gemini-3.1-flash-lite"
+    assert data3["fallback_model"] == "gemini-3.5-flash-lite"
+    assert data3["fallbackModel"] == "gemini-3.5-flash-lite"
 
 
 def test_admin_settings_put_snake_case(client: TestClient) -> None:
@@ -342,7 +342,7 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
     res1 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"active_model": "gemini-snake-active"},
+        json={"active_model": "gemini-3.1-flash-lite"},
     )
     assert res1.status_code == status.HTTP_200_OK
     data1 = res1.json()
@@ -350,14 +350,14 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
     assert "activeModel" in data1
     assert "fallback_model" in data1
     assert "fallbackModel" in data1
-    assert data1["active_model"] == "gemini-snake-active"
-    assert data1["activeModel"] == "gemini-snake-active"
+    assert data1["active_model"] == "gemini-3.1-flash-lite"
+    assert data1["activeModel"] == "gemini-3.1-flash-lite"
 
     # Update fallback_model only
     res2 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
-        json={"fallback_model": "gemini-snake-fallback"},
+        json={"fallback_model": "google/gemini-3.5-flash-lite"},
     )
     assert res2.status_code == status.HTTP_200_OK
     data2 = res2.json()
@@ -365,16 +365,16 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
     assert "activeModel" in data2
     assert "fallback_model" in data2
     assert "fallbackModel" in data2
-    assert data2["fallback_model"] == "gemini-snake-fallback"
-    assert data2["fallbackModel"] == "gemini-snake-fallback"
+    assert data2["fallback_model"] == "google/gemini-3.5-flash-lite"
+    assert data2["fallbackModel"] == "google/gemini-3.5-flash-lite"
 
     # Update both simultaneously
     res3 = client.put(
         "/api/admin/settings",
         headers=AUTH_HEADER,
         json={
-            "active_model": "gemini-both-active",
-            "fallback_model": "gemini-both-fallback",
+            "active_model": "google/gemini-3.1-flash-lite",
+            "fallback_model": "gemini-3.5-flash-lite",
         },
     )
     assert res3.status_code == status.HTTP_200_OK
@@ -383,7 +383,7 @@ def test_admin_settings_put_snake_case(client: TestClient) -> None:
     assert "activeModel" in data3
     assert "fallback_model" in data3
     assert "fallbackModel" in data3
-    assert data3["active_model"] == "gemini-both-active"
-    assert data3["activeModel"] == "gemini-both-active"
-    assert data3["fallback_model"] == "gemini-both-fallback"
-    assert data3["fallbackModel"] == "gemini-both-fallback"
+    assert data3["active_model"] == "google/gemini-3.1-flash-lite"
+    assert data3["activeModel"] == "google/gemini-3.1-flash-lite"
+    assert data3["fallback_model"] == "gemini-3.5-flash-lite"
+    assert data3["fallbackModel"] == "gemini-3.5-flash-lite"

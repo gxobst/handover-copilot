@@ -66,6 +66,22 @@ class GenerationFailedException(StarletteHTTPException):
         self.title = "Generation Failed"
 
 
+class RateLimitExceededException(StarletteHTTPException):
+    """Exception raised when per-client rate limits or global generation caps are exceeded."""
+
+    def __init__(
+        self,
+        detail: str = "Rate limit exceeded to protect Vertex AI quota",
+        retry_after: int = 60,
+    ) -> None:
+        super().__init__(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            headers={"Retry-After": str(max(1, int(retry_after)))},
+        )
+        self.title = "Too Many Requests"
+
+
 class ReportNotFoundException(StarletteHTTPException):
     """Exception raised when a handover report is not found by ID."""
 

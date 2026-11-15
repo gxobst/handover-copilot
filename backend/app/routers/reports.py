@@ -3,10 +3,12 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
+from app.config import Settings, get_settings
 from app.db.reports_repo import ReportRepository, get_report_repository
 from app.errors import ReportNotFoundException
+from app.schemas.errors import ProblemDetails
 from app.schemas.events import SHIFT_KEY_REGEX
 from app.schemas.reports import (
     ReportGenerateRequest,
@@ -14,6 +16,7 @@ from app.schemas.reports import (
     ReportSummary,
 )
 from app.services.handover import HandoverService, get_handover_service
+from app.services.rate_limiter import RateLimiter, get_rate_limiter
 
 router = APIRouter(prefix="/api", tags=["reports"])
 
@@ -24,12 +27,19 @@ router = APIRouter(prefix="/api", tags=["reports"])
     status_code=status.HTTP_201_CREATED,
     summary="Generate shift handover report",
     description="Generate, validate, and persist a structured handover report for a shift using LLM with fallback.",
+    responses={
+        429: {"model": ProblemDetails, "description": "Too Many Requests"},
+    },
 )
 def generate_report_endpoint(
     request: ReportGenerateRequest,
+    raw_request: Request,
     service: HandoverService = Depends(get_handover_service),
+    settings: Settings = Depends(get_settings),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> ReportResponse:
-    """Generate a handover report for the given shift_key with fallback handling."""
+    """Generate a handover report for the given shift_key with fallback handling and rate limiting."""
+    rate_limiter.check_and_record(request=raw_request, settings=settings)
     return service.generate_report(request.shift_key)
 
 

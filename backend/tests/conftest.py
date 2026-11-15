@@ -24,3 +24,14 @@ def prepare_test_database() -> None:
     cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
     cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     command.upgrade(cfg, "head")
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter_fixture():
+    """Ensure in-memory rate limiter state is reset for each test."""
+    from app.services.rate_limiter import get_rate_limiter
+
+    limiter = get_rate_limiter()
+    limiter.reset()
+    yield
+    limiter.reset()

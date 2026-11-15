@@ -591,9 +591,23 @@ handover-copilot/
 ## 22. Security and abuse guards
 
 The demo is public and unauthenticated, so it must not become an open LLM proxy:
-- Per-IP rate limit on `/api/reports/generate` (e.g. 10/hour) → `429`.
+- **Rate limiting and LLM generation caps (`POST /api/reports/generate`) (Issue #41)**:
+  - **Per-client sliding window**: 5 requests per 10 minutes (600 seconds) per client IP.
+  - **Per-client lifetime cap**: Maximum 20 total report generations per client IP (no time limit).
+  - **Global service generation cap**: Hard application-wide budget ceiling of 20 total report generations across all users (no time limit) to strictly protect Vertex AI cloud quota and spend.
+  - **Strict universal enforcement (NO admin token bypass)**: Because this repository is public and any default/hardcoded admin bearer tokens are publicly visible, `Authorization: Bearer <ADMIN_TOKEN>` headers do **NOT** bypass either per-IP rate limits or global generation caps. All incoming requests to `POST /api/reports/generate` are subject to identical strict limits.
+  - **Client IP resolution**: Resolved from `X-Forwarded-For` (first hop) when running behind Cloud Run load balancer, with fallback to `request.client.host`.
+  - **RFC 9457 ProblemDetails**: Rejection on limit violation returns HTTP `429 Too Many Requests` (`application/problem+json`) with title `"Too Many Requests"`, descriptive detail explaining quota protection, W3C `trace_id`, and `Retry-After` header indicating seconds until window clearance.
+  - **Automatic memory pruning**: Expired window timestamps are automatically pruned on each cycle to prevent memory leaks during long-running execution.
+  - **Testing flag**: Supports `rate_limit_enabled: bool = True` in `Settings` for test fixtures and CI/CD pipelines.
+- **Strict Admin Model Selection Allowlist (`PUT /api/admin/settings`) (Issue #41)**:
+  - Admin model configuration is strictly restricted to a 2-model Gemini allowlist:
+    - `google/gemini-3.5-flash-lite` (or `gemini-3.5-flash-lite`)
+    - `google/gemini-3.1-flash-lite` (or `gemini-3.1-flash-lite`)
+  - Outgoing shift leads and administrators may freely hot-swap the active and fallback model order.
+  - Any attempt to submit any other model name (e.g. `gemini-2.5-flash-lite`, `gpt-4`, `claude-3`, or arbitrary strings) is strictly forbidden and rejected with HTTP `422 Unprocessable Content` with descriptive ProblemDetails.
 - Input caps: note ≤ 2000 chars, ≤ 200 events per shift (bounds prompt size and cost).
-- `--max-instances=2` on Cloud Run; **Vertex AI per-day request quota override** (the hard spend cap).
+- `--max-instances=2` on Cloud Run; **Vertex AI per-day request quota override** and **in-memory budget caps** (hard spend ceilings).
 - Admin token: long random value in Secret Manager, constant-time comparison.
 - Prompt injection: untrusted event notes → structured-output schema gate + React text rendering;
   telemetry contains no user text, so the responder cannot be injected through event notes.
@@ -608,13 +622,13 @@ The demo is public and unauthenticated, so it must not become an open LLM proxy:
 |---|---|---|
 | Cloud Run (dev, prod, relay, jobs) | per request + vCPU/RAM-seconds; free tier 240k vCPU-s + 450k GiB-s, 2M requests | $0 |
 | AlloyDB Express (1 vCPU = 1 CU) | $0.115/CU-hr active, $0 paused, $0.30/GB-mo used; free 50 CU + 2 GB/mo (first 12 months per billing account) | $0 (≈$1–2 if the free tier does not apply) |
-| Vertex AI Flash-Lite | per token (~$0.002/report) | < $1 |
+| Vertex AI Flash-Lite | per token (~$0.002/report, protected by 20-generation global budget cap and 5 req / 10 min rate limiter) | < $1 |
 | Grafana Cloud Free | capped free tier | $0 |
 | Artifact Registry | $0.10/GB-mo, cleanup keeps ~1 GB | ~$0.10–0.30 |
 | Secret Manager | $0.06/secret-version/mo | ~$0.20 |
 | GitHub Actions | free on public repos | $0 |
 
-Guards: GCP budget alert at $10, Vertex daily quota override, AR cleanup policy, Grafana hard caps.
+Guards: GCP budget alert at $10, Vertex daily quota override, in-memory 20-generation global spend cap (Issue #41), AR cleanup policy, Grafana hard caps.
 **Verify free-tier eligibility in Phase 0.5** — the AlloyDB allowance is per billing account for
 its first 12 months.
 

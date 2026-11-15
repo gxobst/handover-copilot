@@ -93,6 +93,41 @@ class Settings(BaseSettings):
         ),
         description="Cooldown window in seconds for alert fingerprint deduplication",
     )
+    rate_limit_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("RATE_LIMIT_ENABLED", "rate_limit_enabled"),
+        description="Enable in-memory rate limiting and generation caps on report generation",
+    )
+    rate_limit_window_seconds: int = Field(
+        default=600,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_WINDOW_SECONDS", "rate_limit_window_seconds"
+        ),
+        description="Sliding window duration in seconds for per-client rate limiting",
+    )
+    rate_limit_max_requests: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_MAX_REQUESTS", "rate_limit_max_requests"
+        ),
+        description="Maximum allowed report generation requests per client IP per window",
+    )
+    rate_limit_user_lifetime_cap: int = Field(
+        default=20,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_USER_LIFETIME_CAP", "rate_limit_user_lifetime_cap"
+        ),
+        description="Maximum lifetime report generations allowed per client IP",
+    )
+    rate_limit_global_cap: int = Field(
+        default=20,
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_GLOBAL_CAP",
+            "GLOBAL_DAILY_GENERATION_LIMIT",
+            "rate_limit_global_cap",
+        ),
+        description="Maximum global report generations allowed across entire service",
+    )
 
     @field_validator("relay_webhook_token", mode="before")
     @classmethod

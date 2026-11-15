@@ -695,25 +695,25 @@ def test_admin_settings_response_forbids_extra_fields():
 
 def test_admin_settings_update_active_model_only():
     """Verify AdminSettingsUpdate with active_model only."""
-    up = AdminSettingsUpdate(active_model="gemini-2.5-flash-lite")
-    assert up.active_model == "gemini-2.5-flash-lite"
+    up = AdminSettingsUpdate(active_model="gemini-3.5-flash-lite")
+    assert up.active_model == "gemini-3.5-flash-lite"
     assert up.fallback_model is None
 
 
 def test_admin_settings_update_fallback_model_only():
     """Verify AdminSettingsUpdate with fallback_model only."""
-    up = AdminSettingsUpdate(fallback_model="gemini-3.5-flash")
+    up = AdminSettingsUpdate(fallback_model="gemini-3.1-flash-lite")
     assert up.active_model is None
-    assert up.fallback_model == "gemini-3.5-flash"
+    assert up.fallback_model == "gemini-3.1-flash-lite"
 
 
 def test_admin_settings_update_strips_whitespace():
     """Verify AdminSettingsUpdate trims whitespace from model names."""
     up = AdminSettingsUpdate(
-        active_model="  gemini-2.5-flash-lite  ",
+        active_model="  gemini-3.5-flash-lite  ",
         fallback_model="\tgemini-3.1-flash-lite\n",
     )
-    assert up.active_model == "gemini-2.5-flash-lite"
+    assert up.active_model == "gemini-3.5-flash-lite"
     assert up.fallback_model == "gemini-3.1-flash-lite"
 
 
@@ -755,10 +755,29 @@ def test_admin_settings_update_rejects_invalid_pattern():
         assert "invalid characters" in str(exc.value)
 
 
-def test_admin_settings_update_pattern_only_accepts_non_allowlist():
-    """Verify AdminSettingsUpdate accepts arbitrary valid patterns (not enum-locked)."""
-    valid_cases = ["gemini-2.5-flash-lite", "custom.model_v1.0", "experimental-model-99"]
+def test_admin_settings_update_enforces_strict_allowlist():
+    """Verify AdminSettingsUpdate only accepts the 2 allowed Gemini models (with/without prefix)."""
+    valid_cases = [
+        "google/gemini-3.5-flash-lite",
+        "gemini-3.5-flash-lite",
+        "google/gemini-3.1-flash-lite",
+        "gemini-3.1-flash-lite",
+    ]
     for case in valid_cases:
         up = AdminSettingsUpdate.model_validate({"active_model": case})
         assert up.active_model == case
+
+    disallowed_cases = [
+        "gemini-2.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-4-argon",
+        "custom.model_v1.0",
+        "experimental-model-99",
+        "gpt-4",
+        "claude-3-opus",
+    ]
+    for case in disallowed_cases:
+        with pytest.raises(ValidationError) as exc:
+            AdminSettingsUpdate.model_validate({"active_model": case})
+        assert "Only 'google/gemini-3.5-flash-lite' and 'google/gemini-3.1-flash-lite'" in str(exc.value)
 

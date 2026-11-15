@@ -17,9 +17,19 @@ from pydantic import (
 # Model names must match a non-empty character pattern (allowing alphanumeric, dot, underscore, dash, slash)
 MODEL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._/-]+$")
 
+# Strict 2-model allowlist for Issue #41 cost protection
+ALLOWED_MODELS: frozenset[str] = frozenset(
+    {
+        "google/gemini-3.5-flash-lite",
+        "gemini-3.5-flash-lite",
+        "google/gemini-3.1-flash-lite",
+        "gemini-3.1-flash-lite",
+    }
+)
+
 
 def validate_model_name_value(v: object, field_name: str) -> str:
-    """Validate model name with pattern-only check and whitespace stripping."""
+    """Validate model name with pattern check, whitespace stripping, and strict allowlist enforcement."""
     if v is None:
         raise ValueError(f"{field_name} cannot be null")
     if not isinstance(v, str):
@@ -32,6 +42,12 @@ def validate_model_name_value(v: object, field_name: str) -> str:
     if not MODEL_NAME_PATTERN.match(stripped):
         raise ValueError(
             f"{field_name} contains invalid characters; must match pattern '^[a-zA-Z0-9._-]+$'"
+        )
+    if stripped not in ALLOWED_MODELS:
+        raise ValueError(
+            f"Invalid model '{stripped}' for {field_name}. "
+            "Only 'google/gemini-3.5-flash-lite' and 'google/gemini-3.1-flash-lite' "
+            "(with or without 'google/' prefix) are permitted."
         )
     return stripped
 
