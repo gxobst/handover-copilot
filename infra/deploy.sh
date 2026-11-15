@@ -14,6 +14,7 @@ SERVICE_NAME="${TARGET_SERVICE:-handover-dev}"
 RUNTIME_EMAIL="handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
 DB_INSTANCE_NAME="${DB_INSTANCE:-handover-db}"
 CLOUDSQL_CONNECTION="${PROJECT_ID}:${REGION}:${DB_INSTANCE_NAME}"
+OTEL_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.154.0.3:4318}"
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "ERROR: GCP_PROJECT is not set and could not be determined from gcloud config." >&2
@@ -88,7 +89,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --allow-unauthenticated \
   --clear-cloudsql-instances \
   --set-secrets="DATABASE_URL=DATABASE_URL_${SECRET_SUFFIX}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${SECRET_SUFFIX}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${SECRET_SUFFIX}:latest" \
-  --set-env-vars="APP_ENV=${ENV_NAME},APP_VERSION=${TAG},GCP_PROJECT=${PROJECT_ID},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+  --set-env-vars="APP_ENV=${ENV_NAME},APP_VERSION=${TAG},GCP_PROJECT=${PROJECT_ID},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_ENDPOINT}"
 
 # 6. Verify Live Service Health
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --region="${REGION}" --project="${PROJECT_ID}" --format="value(status.url)")"

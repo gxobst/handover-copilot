@@ -22,6 +22,7 @@ if (-not $ProjectId) {
 
 $imageUri = "${Region}-docker.pkg.dev/${ProjectId}/${RepoName}/app:${ImageTag}"
 $runtimeEmail = "handover-runtime@${ProjectId}.iam.gserviceaccount.com"
+$otelEndpoint = if ($env:OTEL_EXPORTER_OTLP_ENDPOINT) { $env:OTEL_EXPORTER_OTLP_ENDPOINT } else { "http://10.154.0.3:4318" }
 
 Write-Host "==> Configuring Cloud Run Services in '$Region' (project: $ProjectId)..."
 
@@ -57,7 +58,7 @@ foreach ($svc in $services) {
             --allow-unauthenticated `
             --clear-cloudsql-instances `
             --set-secrets="DATABASE_URL=DATABASE_URL_${secretSuffix}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${secretSuffix}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${secretSuffix}:latest" `
-            --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+            --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=${otelEndpoint}"
     } else {
         Write-Host "Deploying new service '$svc'..."
         & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run deploy $svc `
@@ -77,7 +78,7 @@ foreach ($svc in $services) {
             --allow-unauthenticated `
             --clear-cloudsql-instances `
             --set-secrets="DATABASE_URL=DATABASE_URL_${secretSuffix}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${secretSuffix}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${secretSuffix}:latest" `
-            --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+            --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=${otelEndpoint}"
     }
 
     $serviceUrl = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run services describe $svc --region=$Region --project=$ProjectId --format="value(status.url)" 2>$null

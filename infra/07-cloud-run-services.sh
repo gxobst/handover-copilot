@@ -12,6 +12,7 @@ REPO_NAME="${ARTIFACT_REPO:-handover}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app:${IMAGE_TAG}"
 RUNTIME_EMAIL="handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+OTEL_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.154.0.3:4318}"
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "ERROR: GCP_PROJECT is not set and could not be determined from gcloud config." >&2
@@ -49,7 +50,7 @@ for svc in "${SERVICES[@]}"; do
     "--allow-unauthenticated"
     "--clear-cloudsql-instances"
     "--set-secrets=DATABASE_URL=DATABASE_URL_${SECRET_SUFFIX}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${SECRET_SUFFIX}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${SECRET_SUFFIX}:latest"
-    "--set-env-vars=APP_ENV=${ENV_NAME},APP_VERSION=${IMAGE_TAG},GCP_PROJECT=${PROJECT_ID},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+    "--set-env-vars=APP_ENV=${ENV_NAME},APP_VERSION=${IMAGE_TAG},GCP_PROJECT=${PROJECT_ID},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_ENDPOINT}"
   )
 
   if gcloud run services describe "${svc}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then

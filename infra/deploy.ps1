@@ -6,6 +6,7 @@ $ProjectId = if ($env:GCP_PROJECT) { $env:GCP_PROJECT } else { (gcloud.cmd confi
 $Region = if ($env:GCP_REGION) { $env:GCP_REGION } else { "europe-west2" }
 $Repo = if ($env:ARTIFACT_REPO) { $env:ARTIFACT_REPO } else { "handover" }
 $Service = if ($env:TARGET_SERVICE) { $env:TARGET_SERVICE } else { "handover-dev" }
+$otelEndpoint = if ($env:OTEL_EXPORTER_OTLP_ENDPOINT) { $env:OTEL_EXPORTER_OTLP_ENDPOINT } else { "http://10.154.0.3:4318" }
 
 $shortSha = (& git rev-parse --short HEAD).Trim()
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -53,7 +54,7 @@ $RuntimeEmail = "handover-runtime@$ProjectId.iam.gserviceaccount.com"
   --allow-unauthenticated `
   --clear-cloudsql-instances `
   --set-secrets="DATABASE_URL=DATABASE_URL_${secretSuffix}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${secretSuffix}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${secretSuffix}:latest" `
-  --set-env-vars="APP_ENV=$envName,APP_VERSION=$tag,GCP_PROJECT=$ProjectId,GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+  --set-env-vars="APP_ENV=$envName,APP_VERSION=$tag,GCP_PROJECT=$ProjectId,GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=$otelEndpoint"
 
 $serviceUrl = (& gcloud.cmd run services describe $Service --region=$Region --project=$ProjectId --format="value(status.url)").Trim()
 Write-Host "==> [6/6] Verifying live health check at $serviceUrl/api/healthz..."

@@ -85,3 +85,46 @@ Because Google Cloud Run throttles container CPU between HTTP requests (when ins
 `TelemetryMiddleware` executes in `backend/app/main.py`:
 - In a `finally` block guaranteed to execute upon request completion (even when exceptions or HTTP 5xx occur).
 - Calls `force_flush()` on both the OpenTelemetry `TracerProvider` and `MeterProvider` with a 5000 ms timeout.
+
+---
+
+## 7. Standalone GCP Observability Stack Deployment (Issue #37)
+
+The self-contained observability stack runs on a dedicated Compute Engine VM host decoupled from the Cloud Run application stack in GCP region `europe-west2`:
+
+- **Host Instance:** `handover-observability` (`e2-medium`, Ubuntu 24.04 LTS AMD64, zone `europe-west2-a`).
+- **Network / Subnet:** VPC `default`, Subnet `default` (`10.154.0.0/20`).
+- **Internal IP:** `10.154.0.3` (accessible via Direct VPC Egress from Cloud Run `handover-dev` and `handover-prod`).
+- **External IP:** `34.153.185.34` (accessible from operator workstations and CI/CD pipelines).
+- **Firewall Rule:** `allow-observability-ingress` attached via tag `observability-stack` allowing ports:
+  - `tcp:3000` (Grafana UI & REST API)
+  - `tcp:4317` (OTLP gRPC receiver)
+  - `tcp:4318` (OTLP HTTP receiver)
+  - `tcp:9090` (Prometheus web UI & API)
+  - `tcp:3100` (Loki log ingestion & query)
+  - `tcp:3200` (Tempo trace ingestion & query)
+  - `tcp:13133` (Collector health check extension)
+
+### Ingestion & Endpoints
+
+| Component | Port | Health Endpoint | Purpose |
+|---|---|---|---|
+| OpenTelemetry Collector | `4318` (HTTP), `4317` (gRPC) | `http://<HOST>:13133/` | Unified telemetry ingestion for spans, metrics, and logs |
+| Prometheus | `9090` | `http://<HOST>:9090/-/ready` | Metrics TSDB scraping collector `:8889` every 5s |
+| Loki | `3100` | `http://<HOST>:3100/ready` | Standalone filesystem log storage |
+| Tempo | `3200` | `http://<HOST>:3200/ready` | Distributed trace storage (OTLP gRPC) |
+| Grafana | `3000` | `http://<HOST>:3000/api/health` | Unified dashboards with `$environment` and `$version` filtering |
+
+### Cloud Run Direct VPC Egress Integration
+
+Cloud Run services `handover-dev` and `handover-prod` are configured with:
+- `--network=default --subnet=default --vpc-egress=private-ranges-only`
+- `OTEL_EXPORTER_OTLP_ENDPOINT=http://10.154.0.3:4318`
+
+Telemetry packets flow securely through private Google Cloud networking directly to the collector without traversing public internet routes.
+
+### Automation Scripts
+
+- Provisioning: `infra/08-observability-stack.sh` & `infra/08-observability-stack.ps1`
+- Live Verification: `scripts/verify_deployed_observability.py`
+

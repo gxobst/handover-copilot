@@ -255,7 +255,7 @@ jobs:
             --timeout=120 \
             --clear-cloudsql-instances \
             --set-secrets="ADMIN_TOKEN=ADMIN_TOKEN_DEV:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_DEV:latest,DATABASE_URL=DATABASE_URL_DEV:latest" \
-            --set-env-vars="APP_ENV=dev,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+            --set-env-vars="APP_ENV=dev,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20,OTEL_EXPORTER_OTLP_ENDPOINT=http://10.154.0.3:4318"
 
       - name: Post-Deployment Health Validation
         id: validate-deploy
