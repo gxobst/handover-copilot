@@ -204,11 +204,11 @@ jobs:
 
       - name: Run Cloud Run migration job
         run: |
-          gcloud run jobs execute handover-migrate --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --wait
+          gcloud run jobs execute handover-migrate-dev --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --wait
 
       - name: Deploy to Cloud Run
         run: |
-          gcloud run deploy "${{ env.SERVICE_NAME }}" --image="${{ steps.image-tag.outputs.image_uri }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --platform=managed --allow-unauthenticated --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" --port=8000 --min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120 --add-cloudsql-instances="${{ env.CLOUDSQL_INSTANCE }}" --set-secrets="ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest,DATABASE_URL=DATABASE_URL:latest" --set-env-vars="APP_ENV=dev,PORT=8000,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+          gcloud run deploy "${{ env.SERVICE_NAME }}" --image="${{ steps.image-tag.outputs.image_uri }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --platform=managed --allow-unauthenticated --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" --network="default" --subnet="default" --vpc-egress="private-ranges-only" --port=8000 --min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120 --clear-cloudsql-instances --set-secrets="ADMIN_TOKEN=ADMIN_TOKEN_DEV:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_DEV:latest,DATABASE_URL=DATABASE_URL_DEV:latest" --set-env-vars="APP_ENV=dev,PORT=8000,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
 
       - name: Post-Deployment Health Validation
         id: validate-deploy

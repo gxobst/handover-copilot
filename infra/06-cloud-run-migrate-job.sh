@@ -11,37 +11,55 @@ REGION="${GCP_REGION:-europe-west2}"
 REPO_NAME="${ARTIFACT_REPO:-handover}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/app:${IMAGE_TAG}"
-JOB_NAME="handover-migrate"
-RUNTIME_EMAIL="handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+# Target job can be specified via env var or 1st arg: "dev", "prod", or "all" (default)
+TARGET_JOB="${1:-${MIGRATE_TARGET:-all}}"
 
-if [[ -z "${PROJECT_ID}" ]]; then
-  echo "ERROR: GCP_PROJECT is not set and could not be determined from gcloud config." >&2
-  exit 1
+provision_job() {
+  local job_name="$1"
+  local secret_name="$2"
+
+  echo "==> Configuring Cloud Run Job '${job_name}' in '${REGION}' (secret: ${secret_name})..."
+
+  local flags=(
+    "--image=${IMAGE_URI}"
+    "--region=${REGION}"
+    "--project=${PROJECT_ID}"
+    "--service-account=${RUNTIME_EMAIL}"
+    "--network=default"
+    "--subnet=default"
+    "--vpc-egress=private-ranges-only"
+    "--set-secrets=DATABASE_URL=${secret_name}:latest"
+    "--clear-cloudsql-instances"
+    "--command=uv"
+    "--args=run,alembic,upgrade,head"
+    "--max-retries=1"
+    "--task-timeout=300s"
+    "--cpu=1"
+    "--memory=512Mi"
+  )
+
+  if gcloud run jobs describe "${job_name}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    echo "Updating existing Cloud Run Job '${job_name}'..."
+    gcloud run jobs update "${job_name}" "${flags[@]}"
+  else
+    echo "Creating Cloud Run Job '${job_name}'..."
+    gcloud run jobs create "${job_name}" "${flags[@]}"
+  fi
+
+  echo "Cloud Run Job '${job_name}' configured successfully."
+}
+
+if [[ "${TARGET_JOB}" == "dev" || "${TARGET_JOB}" == "all" ]]; then
+  provision_job "handover-migrate-dev" "DATABASE_URL_DEV"
 fi
 
-echo "==> Configuring Cloud Run Job '${JOB_NAME}' in '${REGION}' (project: ${PROJECT_ID})..."
-
-COMMON_FLAGS=(
-  "--image=${IMAGE_URI}"
-  "--region=${REGION}"
-  "--project=${PROJECT_ID}"
-  "--service-account=${RUNTIME_EMAIL}"
-  "--set-secrets=DATABASE_URL=DATABASE_URL:latest"
-  "--clear-cloudsql-instances"
-  "--command=uv"
-  "--args=run,alembic,upgrade,head"
-  "--max-retries=1"
-  "--task-timeout=300s"
-  "--cpu=1"
-  "--memory=512Mi"
-)
-
-if gcloud run jobs describe "${JOB_NAME}" --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-  echo "Updating existing Cloud Run Job '${JOB_NAME}'..."
-  gcloud run jobs update "${JOB_NAME}" "${COMMON_FLAGS[@]}"
-else
-  echo "Creating Cloud Run Job '${JOB_NAME}'..."
-  gcloud run jobs create "${JOB_NAME}" "${COMMON_FLAGS[@]}"
+if [[ "${TARGET_JOB}" == "prod" || "${TARGET_JOB}" == "all" ]]; then
+  provision_job "handover-migrate-prod" "DATABASE_URL_PROD"
 fi
 
-echo "==> Cloud Run Job '${JOB_NAME}' configured successfully."
+# Also update legacy handover-migrate job pointing to DATABASE_URL_DEV for backwards compatibility
+if [[ "${TARGET_JOB}" == "legacy" || "${TARGET_JOB}" == "all" ]]; then
+  provision_job "handover-migrate" "DATABASE_URL_DEV"
+fi
+
+echo "==> Migration job configuration complete."

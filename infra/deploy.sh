@@ -50,27 +50,35 @@ docker push "${IMAGE_TAGGED}"
 docker push "${IMAGE_LATEST}"
 
 # 4. Update and Execute Database Migration Job
-echo "==> Ensuring migration job exists with image ${IMAGE_TAGGED}..."
-IMAGE_TAG="${TAG}" "${SCRIPT_DIR}/06-cloud-run-migrate-job.sh"
+ENV_NAME="dev"
+SECRET_SUFFIX="DEV"
+MIGRATE_JOB="handover-migrate-dev"
+if [[ "${SERVICE_NAME}" == *"prod"* ]]; then
+  ENV_NAME="prod"
+  SECRET_SUFFIX="PROD"
+  MIGRATE_JOB="handover-migrate-prod"
+fi
 
-echo "==> Executing database migration job 'handover-migrate'..."
-gcloud run jobs execute handover-migrate \
+echo "==> Ensuring migration jobs exist with image ${IMAGE_TAGGED}..."
+IMAGE_TAG="${TAG}" "${SCRIPT_DIR}/06-cloud-run-migrate-job.sh" "${ENV_NAME}"
+
+echo "==> Executing database migration job '${MIGRATE_JOB}'..."
+gcloud run jobs execute "${MIGRATE_JOB}" \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --wait
 
 # 5. Deploy Cloud Run Service
-echo "==> Deploying Cloud Run service '${SERVICE_NAME}'..."
-ENV_NAME="dev"
-if [[ "${SERVICE_NAME}" == *"prod"* ]]; then
-  ENV_NAME="prod"
-fi
+echo "==> Deploying Cloud Run service '${SERVICE_NAME}' (${ENV_NAME})..."
 
 gcloud run deploy "${SERVICE_NAME}" \
   --image="${IMAGE_TAGGED}" \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --service-account="${RUNTIME_EMAIL}" \
+  --network="default" \
+  --subnet="default" \
+  --vpc-egress="private-ranges-only" \
   --min-instances=0 \
   --max-instances=2 \
   --cpu=1 \
@@ -78,8 +86,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --timeout=120 \
   --port=8000 \
   --allow-unauthenticated \
-  --set-cloudsql-instances="${CLOUDSQL_CONNECTION}" \
-  --set-secrets=DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest \
+  --clear-cloudsql-instances \
+  --set-secrets="DATABASE_URL=DATABASE_URL_${SECRET_SUFFIX}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${SECRET_SUFFIX}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${SECRET_SUFFIX}:latest" \
   --set-env-vars="APP_ENV=${ENV_NAME},APP_VERSION=${TAG},GCP_PROJECT=${PROJECT_ID},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
 
 # 6. Verify Live Service Health

@@ -66,8 +66,8 @@ jobs:
           IMAGE_TAG: ${{ steps.resolve-image.outputs.image_tag }}
         run: |
           chmod +x ./infra/06-cloud-run-migrate-job.sh
-          ./infra/06-cloud-run-migrate-job.sh
-          gcloud run jobs execute handover-migrate \
+          ./infra/06-cloud-run-migrate-job.sh prod
+          gcloud run jobs execute handover-migrate-prod \
             --region="${{ env.REGION }}" \
             --project="${{ env.PROJECT_ID }}" \
             --wait
@@ -82,6 +82,9 @@ jobs:
             --region="${{ env.REGION }}" \
             --project="${{ env.PROJECT_ID }}" \
             --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" \
+            --network="default" \
+            --subnet="default" \
+            --vpc-egress="private-ranges-only" \
             --min-instances=0 \
             --max-instances=2 \
             --cpu=1 \
@@ -89,8 +92,8 @@ jobs:
             --timeout=120 \
             --port=8000 \
             --allow-unauthenticated \
-            --set-cloudsql-instances="${{ env.CLOUDSQL_INSTANCE }}" \
-            --set-secrets=DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest \
+            --clear-cloudsql-instances \
+            --set-secrets=DATABASE_URL=DATABASE_URL_PROD:latest,ADMIN_TOKEN=ADMIN_TOKEN_PROD:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_PROD:latest \
             --set-env-vars="APP_ENV=prod,APP_VERSION=${TAG},GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
 
       - name: Perform production smoke check

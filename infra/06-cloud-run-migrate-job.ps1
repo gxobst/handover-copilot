@@ -9,7 +9,7 @@ param(
     [string]$Region = "europe-west2",
     [string]$RepoName = "handover",
     [string]$ImageTag = "latest",
-    [string]$JobName = "handover-migrate"
+    [string]$TargetJob = "all"
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,38 +24,57 @@ if (-not $ProjectId) {
 $imageUri = "${Region}-docker.pkg.dev/${ProjectId}/${RepoName}/app:${ImageTag}"
 $runtimeEmail = "handover-runtime@${ProjectId}.iam.gserviceaccount.com"
 
-Write-Host "==> Configuring Cloud Run Job '$JobName' in '$Region' (project: $ProjectId)..."
-
-$jobCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs describe $JobName --region=$Region --project=$ProjectId 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Updating existing Cloud Run Job '$JobName'..."
-    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs update $JobName `
-        --image=$imageUri `
-        --region=$Region `
-        --project=$ProjectId `
-        --service-account=$runtimeEmail `
-        --set-secrets="DATABASE_URL=DATABASE_URL:latest" `
-        --clear-cloudsql-instances `
-        --command="uv" `
-        --args="run,alembic,upgrade,head" `
-        --max-retries=1 `
-        --task-timeout="300s" `
-        --cpu=1 `
-        --memory="512Mi"
-} else {
-    Write-Host "Creating Cloud Run Job '$JobName'..."
-    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs create $JobName `
-        --image=$imageUri `
-        --region=$Region `
-        --project=$ProjectId `
-        --service-account=$runtimeEmail `
-        --set-secrets="DATABASE_URL=DATABASE_URL:latest" `
-        --command="uv" `
-        --args="run,alembic,upgrade,head" `
-        --max-retries=1 `
-        --task-timeout="300s" `
-        --cpu=1 `
-        --memory="512Mi"
+function Provision-MigrateJob($job, $secret) {
+    Write-Host "==> Configuring Cloud Run Job '$job' in '$Region' (secret: $secret)..."
+    $jobCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs describe $job --region=$Region --project=$ProjectId 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Updating existing Cloud Run Job '$job'..."
+        & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs update $job `
+            --image=$imageUri `
+            --region=$Region `
+            --project=$ProjectId `
+            --service-account=$runtimeEmail `
+            --network="default" `
+            --subnet="default" `
+            --vpc-egress="private-ranges-only" `
+            --set-secrets="DATABASE_URL=${secret}:latest" `
+            --clear-cloudsql-instances `
+            --command="uv" `
+            --args="run,alembic,upgrade,head" `
+            --max-retries=1 `
+            --task-timeout="300s" `
+            --cpu=1 `
+            --memory="512Mi"
+    } else {
+        Write-Host "Creating Cloud Run Job '$job'..."
+        & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run jobs create $job `
+            --image=$imageUri `
+            --region=$Region `
+            --project=$ProjectId `
+            --service-account=$runtimeEmail `
+            --network="default" `
+            --subnet="default" `
+            --vpc-egress="private-ranges-only" `
+            --set-secrets="DATABASE_URL=${secret}:latest" `
+            --command="uv" `
+            --args="run,alembic,upgrade,head" `
+            --max-retries=1 `
+            --task-timeout="300s" `
+            --cpu=1 `
+            --memory="512Mi"
+    }
 }
 
-Write-Host "==> Cloud Run Job '$JobName' configured successfully."
+if ($TargetJob -eq "dev" -or $TargetJob -eq "all") {
+    Provision-MigrateJob "handover-migrate-dev" "DATABASE_URL_DEV"
+}
+
+if ($TargetJob -eq "prod" -or $TargetJob -eq "all") {
+    Provision-MigrateJob "handover-migrate-prod" "DATABASE_URL_PROD"
+}
+
+if ($TargetJob -eq "legacy" -or $TargetJob -eq "all") {
+    Provision-MigrateJob "handover-migrate" "DATABASE_URL_DEV"
+}
+
+Write-Host "==> Migration job configuration complete."

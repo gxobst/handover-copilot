@@ -55,15 +55,66 @@ while true; do
   sleep 15
 done
 
-# Resolve connection info / IP
-IP_ADDRESS="$(gcloud alloydb instances describe "${INSTANCE_ID}" --cluster="${CLUSTER_ID}" --region="${REGION}" --project="${PROJECT_ID}" --format="value(ipAddress)" 2>/dev/null || echo "")"
-echo "AlloyDB instance '${INSTANCE_ID}' is READY (IP: ${IP_ADDRESS})."
+# Ensure allowed PSC projects on instance
+gcloud alloydb instances update "${INSTANCE_ID}" \
+  --cluster="${CLUSTER_ID}" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --allowed-psc-projects="${PROJECT_ID}" \
+  --quiet >/dev/null 2>&1 || true
 
-DATABASE_URL="postgresql+psycopg://postgres:${DB_PASS}@${IP_ADDRESS}:5432/postgres"
+# Resolve connection info / PSC DNS
+PSC_DNS="$(gcloud alloydb instances describe "${INSTANCE_ID}" --cluster="${CLUSTER_ID}" --region="${REGION}" --project="${PROJECT_ID}" --format="value(pscInstanceConfig.pscDnsName)" 2>/dev/null || echo "")"
+echo "AlloyDB instance '${INSTANCE_ID}' is READY (PSC DNS: ${PSC_DNS})."
 
-echo "Updating DATABASE_URL in Secret Manager..."
-printf "%s" "${DATABASE_URL}" | gcloud secrets versions add "DATABASE_URL" \
-  --data-file=- \
-  --project="${PROJECT_ID}" >/dev/null
+# Ensure consumer PSC IP and Forwarding Rule in VPC default
+SA_LINK="$(gcloud alloydb instances describe "${INSTANCE_ID}" --cluster="${CLUSTER_ID}" --region="${REGION}" --project="${PROJECT_ID}" --format="value(pscInstanceConfig.serviceAttachmentLink)" 2>/dev/null || echo "")"
+if ! gcloud compute addresses describe alloydb-psc-ip --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  echo "Creating consumer PSC IP 'alloydb-psc-ip'..."
+  gcloud compute addresses create alloydb-psc-ip --region="${REGION}" --subnet="default" --project="${PROJECT_ID}"
+fi
+PSC_IP="$(gcloud compute addresses describe alloydb-psc-ip --region="${REGION}" --project="${PROJECT_ID}" --format="value(address)")"
+
+if ! gcloud compute forwarding-rules describe alloydb-psc-forwarding-rule --region="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  echo "Creating consumer PSC forwarding rule 'alloydb-psc-forwarding-rule'..."
+  gcloud compute forwarding-rules create alloydb-psc-forwarding-rule \
+    --region="${REGION}" \
+    --network="default" \
+    --address="alloydb-psc-ip" \
+    --target-service-attachment="${SA_LINK}" \
+    --project="${PROJECT_ID}"
+fi
+
+# Ensure private Cloud DNS zone and record for PSC DNS resolution
+gcloud services enable dns.googleapis.com --project="${PROJECT_ID}" --quiet >/dev/null 2>&1 || true
+if ! gcloud dns managed-zones describe alloydb-psc-zone --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  echo "Creating private Cloud DNS zone 'alloydb-psc-zone'..."
+  gcloud dns managed-zones create alloydb-psc-zone \
+    --dns-name="alloydb-psc.goog." \
+    --description="AlloyDB PSC Private Zone" \
+    --visibility=private \
+    --networks="default" \
+    --project="${PROJECT_ID}"
+fi
+
+if ! gcloud dns record-sets list --zone=alloydb-psc-zone --project="${PROJECT_ID}" --format="value(name)" | grep -q "${PSC_DNS}"; then
+  echo "Creating DNS record for ${PSC_DNS} -> ${PSC_IP}..."
+  gcloud dns record-sets create "${PSC_DNS}" \
+    --zone="alloydb-psc-zone" \
+    --type="A" \
+    --ttl=300 \
+    --rrdatas="${PSC_IP}" \
+    --project="${PROJECT_ID}"
+fi
+
+HOST="${PSC_DNS:-${PSC_IP}}"
+DATABASE_URL_DEV="postgresql+psycopg://postgres:${DB_PASS}@${HOST}:5432/handover_dev?sslmode=require"
+DATABASE_URL_PROD="postgresql+psycopg://postgres:${DB_PASS}@${HOST}:5432/handover_prod?sslmode=require"
+DATABASE_URL="${DATABASE_URL_DEV}"
+
+echo "Updating database connection secrets in Secret Manager..."
+printf "%s" "${DATABASE_URL_DEV}" | gcloud secrets versions add "DATABASE_URL_DEV" --data-file=- --project="${PROJECT_ID}" >/dev/null 2>&1 || true
+printf "%s" "${DATABASE_URL_PROD}" | gcloud secrets versions add "DATABASE_URL_PROD" --data-file=- --project="${PROJECT_ID}" >/dev/null 2>&1 || true
+printf "%s" "${DATABASE_URL}" | gcloud secrets versions add "DATABASE_URL" --data-file=- --project="${PROJECT_ID}" >/dev/null 2>&1 || true
 
 echo "==> AlloyDB cluster '${CLUSTER_ID}' / instance '${INSTANCE_ID}' configured successfully."

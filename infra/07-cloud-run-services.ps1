@@ -31,8 +31,10 @@ foreach ($svc in $services) {
     Write-Host "--- Provisioning Cloud Run service: $svc ---"
     
     $envName = "dev"
+    $secretSuffix = "DEV"
     if ($svc -eq "handover-prod") {
         $envName = "prod"
+        $secretSuffix = "PROD"
     }
 
     $svcCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" run services describe $svc --region=$Region --project=$ProjectId 2>$null
@@ -43,6 +45,9 @@ foreach ($svc in $services) {
             --region=$Region `
             --project=$ProjectId `
             --service-account=$runtimeEmail `
+            --network="default" `
+            --subnet="default" `
+            --vpc-egress="private-ranges-only" `
             --min-instances=0 `
             --max-instances=2 `
             --cpu=1 `
@@ -51,7 +56,7 @@ foreach ($svc in $services) {
             --port=8000 `
             --allow-unauthenticated `
             --clear-cloudsql-instances `
-            --set-secrets="DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest" `
+            --set-secrets="DATABASE_URL=DATABASE_URL_${secretSuffix}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${secretSuffix}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${secretSuffix}:latest" `
             --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
     } else {
         Write-Host "Deploying new service '$svc'..."
@@ -60,6 +65,9 @@ foreach ($svc in $services) {
             --region=$Region `
             --project=$ProjectId `
             --service-account=$runtimeEmail `
+            --network="default" `
+            --subnet="default" `
+            --vpc-egress="private-ranges-only" `
             --min-instances=0 `
             --max-instances=2 `
             --cpu=1 `
@@ -67,7 +75,8 @@ foreach ($svc in $services) {
             --timeout=120 `
             --port=8000 `
             --allow-unauthenticated `
-            --set-secrets="DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest" `
+            --clear-cloudsql-instances `
+            --set-secrets="DATABASE_URL=DATABASE_URL_${secretSuffix}:latest,ADMIN_TOKEN=ADMIN_TOKEN_${secretSuffix}:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_${secretSuffix}:latest" `
             --set-env-vars="APP_ENV=${envName},APP_VERSION=${ImageTag},GCP_PROJECT=${ProjectId},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
     }
 

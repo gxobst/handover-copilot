@@ -904,6 +904,34 @@ Issue #27 introduces a unified GitHub Actions CI/CD pipeline (`.github/workflows
 6. **Automated Verification Script (`scripts/verify_gcp_pipeline.py`)**:
    - Standalone Python validator verifying YAML syntax, triggers, parallel job execution, sequential dependency chains, Docker Compose / Playwright steps, WIF OIDC setup, health check loop, and zero occurrences of non-target cloud provider references.
 
+---
+
+## 16. Independent Production Environment Infrastructure Copy on GCP (#28)
+
+Established a fully independent, isolated production environment infrastructure copy on GCP alongside the existing development environment to eliminate cross-environment contamination.
+
+### Architecture & Isolation Matrix
+
+| Component | Development (`dev`) | Production (`prod`) | Backwards-Compatible Legacy |
+| :--- | :--- | :--- | :--- |
+| **AlloyDB Database** | `handover_dev` on cluster `handover-cluster` | `handover_prod` on cluster `handover-cluster` | `postgres` |
+| **Secret Manager DB URL** | `DATABASE_URL_DEV` | `DATABASE_URL_PROD` | `DATABASE_URL` (points to dev) |
+| **Admin Token Secret** | `ADMIN_TOKEN_DEV` | `ADMIN_TOKEN_PROD` (distinct token) | `ADMIN_TOKEN` |
+| **Relay Webhook Secret** | `RELAY_WEBHOOK_TOKEN_DEV` | `RELAY_WEBHOOK_TOKEN_PROD` (distinct token) | `RELAY_WEBHOOK_TOKEN` |
+| **Cloud Run Migration Job** | `handover-migrate-dev` (`DATABASE_URL_DEV:latest`) | `handover-migrate-prod` (`DATABASE_URL_PROD:latest`) | `handover-migrate` |
+| **Cloud Run Service** | `handover-dev` (`APP_ENV=dev`) | `handover-prod` (`APP_ENV=prod`) | — |
+| **Network & Connectivity** | Direct VPC Egress (`--network=default --subnet=default --vpc-egress=private-ranges-only`) to AlloyDB PSC endpoint (`10.154.0.2` via `alloydb-psc-forwarding-rule` and Cloud DNS `alloydb-psc-zone`) | Direct VPC Egress (`--network=default --subnet=default --vpc-egress=private-ranges-only`) to AlloyDB PSC endpoint (`10.154.0.2` via `alloydb-psc-forwarding-rule` and Cloud DNS `alloydb-psc-zone`) | — |
+
+### Verification & Automated Testing
+- `scripts/verify_isolated_environments.py` verifies:
+  1. Secret Manager isolation and distinct values for `*_DEV` vs `*_PROD`.
+  2. Dedicated migration jobs `handover-migrate-dev` and `handover-migrate-prod` with respective secret bindings.
+  3. Cloud Run services `handover-dev` and `handover-prod` configured with respective environment variables and secret bindings.
+  4. Live `/api/healthz` responding HTTP 200 with matching `environment: dev` and `environment: prod`.
+  5. Live data isolation: synthetic events created on dev do NOT appear in prod.
+  6. Live auth & admin settings isolation: dev tokens are rejected on prod with 401, and admin setting mutations on dev do not contaminate prod.
+
+
 
 
 

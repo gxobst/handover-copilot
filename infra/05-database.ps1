@@ -61,15 +61,74 @@ while ($true) {
     Start-Sleep -Seconds 15
 }
 
-$ip = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId --format="value(ipAddress)" 2>$null
-Write-Host "AlloyDB instance '$InstanceId' is READY (IP: $ip)."
+# Ensure allowed PSC projects on instance
+& "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances update $InstanceId `
+    --cluster=$ClusterId `
+    --region=$Region `
+    --project=$ProjectId `
+    --allowed-psc-projects=$ProjectId `
+    --quiet 2>$null
 
-$databaseUrl = "postgresql+psycopg://postgres:${DbPassword}@${ip}:5432/postgres"
+$pscDns = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId --format="value(pscInstanceConfig.pscDnsName)" 2>$null
+Write-Host "AlloyDB instance '$InstanceId' is READY (PSC DNS: $pscDns)."
 
-Write-Host "Updating DATABASE_URL in Secret Manager..."
-$tempFile = [System.IO.Path]::GetTempFileName()
-[System.IO.File]::WriteAllText($tempFile, $databaseUrl)
-& "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" secrets versions add "DATABASE_URL" --data-file=$tempFile --project=$ProjectId
-Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+$saLink = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" alloydb instances describe $InstanceId --cluster=$ClusterId --region=$Region --project=$ProjectId --format="value(pscInstanceConfig.serviceAttachmentLink)" 2>$null
+$addrCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" compute addresses describe alloydb-psc-ip --region=$Region --project=$ProjectId 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Creating consumer PSC IP 'alloydb-psc-ip'..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" compute addresses create alloydb-psc-ip --region=$Region --subnet="default" --project=$ProjectId
+}
+$pscIp = (& "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" compute addresses describe alloydb-psc-ip --region=$Region --project=$ProjectId --format="value(address)").Trim()
+
+$fwdCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" compute forwarding-rules describe alloydb-psc-forwarding-rule --region=$Region --project=$ProjectId 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Creating consumer PSC forwarding rule 'alloydb-psc-forwarding-rule'..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" compute forwarding-rules create alloydb-psc-forwarding-rule `
+        --region=$Region `
+        --network="default" `
+        --address="alloydb-psc-ip" `
+        --target-service-attachment=$saLink `
+        --project=$ProjectId
+}
+
+& "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" services enable dns.googleapis.com --project=$ProjectId --quiet 2>$null
+$zoneCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" dns managed-zones describe alloydb-psc-zone --project=$ProjectId 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Creating private Cloud DNS zone 'alloydb-psc-zone'..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" dns managed-zones create alloydb-psc-zone `
+        --dns-name="alloydb-psc.goog." `
+        --description="AlloyDB PSC Private Zone" `
+        --visibility=private `
+        --networks="default" `
+        --project=$ProjectId
+}
+
+$recCheck = & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" dns record-sets list --zone=alloydb-psc-zone --project=$ProjectId --format="value(name)" 2>$null
+if ($recCheck -notmatch [regex]::Escape($pscDns)) {
+    Write-Host "Creating DNS record for $pscDns -> $pscIp..."
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" dns record-sets create $pscDns `
+        --zone="alloydb-psc-zone" `
+        --type="A" `
+        --ttl=300 `
+        --rrdatas=$pscIp `
+        --project=$ProjectId
+}
+
+$hostName = if ($pscDns) { $pscDns } else { $pscIp }
+$databaseUrlDev = "postgresql+psycopg://postgres:${DbPassword}@${hostName}:5432/handover_dev?sslmode=require"
+$databaseUrlProd = "postgresql+psycopg://postgres:${DbPassword}@${hostName}:5432/handover_prod?sslmode=require"
+$databaseUrl = $databaseUrlDev
+
+function Update-SecretVersion($name, $val) {
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    [System.IO.File]::WriteAllText($tempFile, $val)
+    & "C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" secrets versions add $name --data-file=$tempFile --project=$ProjectId 2>$null
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Updating database secrets in Secret Manager..."
+Update-SecretVersion "DATABASE_URL_DEV" $databaseUrlDev
+Update-SecretVersion "DATABASE_URL_PROD" $databaseUrlProd
+Update-SecretVersion "DATABASE_URL" $databaseUrl
 
 Write-Host "==> AlloyDB cluster '$ClusterId' / instance '$InstanceId' configured successfully."

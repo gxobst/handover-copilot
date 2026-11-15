@@ -50,17 +50,35 @@ ensure_secret() {
     --quiet >/dev/null
 }
 
-# 1. ADMIN_TOKEN
-ADMIN_TOKEN_VAL="${ADMIN_TOKEN:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-admin-token-$(date +%s)")}"
-ensure_secret "ADMIN_TOKEN" "${ADMIN_TOKEN_VAL}"
+# 1. Environment-scoped secrets for Dev
+DEV_DB_URL="${DATABASE_URL_DEV:-postgresql+psycopg://postgres:Yg0vCNCSfVTNpicWso_EBwDqvk4Vd9V1@f83b3631-742d-441d-b8bd-9cc88f57ddd6.166864bd-1d76-4532-828e-781c48d19b1f.europe-west2.alloydb-psc.goog.:5432/handover_dev?sslmode=require}"
+ensure_secret "DATABASE_URL_DEV" "${DEV_DB_URL}"
 
-# 2. RELAY_WEBHOOK_TOKEN
-RELAY_TOKEN_VAL="${RELAY_WEBHOOK_TOKEN:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-relay-token-$(date +%s)")}"
-ensure_secret "RELAY_WEBHOOK_TOKEN" "${RELAY_TOKEN_VAL}"
+DEV_ADMIN_TOKEN="${ADMIN_TOKEN_DEV:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-admin-dev-$(date +%s)")}"
+ensure_secret "ADMIN_TOKEN_DEV" "${DEV_ADMIN_TOKEN}"
 
-# 3. DATABASE_URL
-DEFAULT_DB_URL="${DATABASE_URL:-postgresql+psycopg://postgres:Yg0vCNCSfVTNpicWso_EBwDqvk4Vd9V1@/handover?host=/cloudsql/${PROJECT_ID}:europe-west2:handover-db}"
+DEV_RELAY_TOKEN="${RELAY_WEBHOOK_TOKEN_DEV:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-relay-dev-$(date +%s)")}"
+ensure_secret "RELAY_WEBHOOK_TOKEN_DEV" "${DEV_RELAY_TOKEN}"
+
+# 2. Environment-scoped secrets for Prod
+PROD_DB_URL="${DATABASE_URL_PROD:-postgresql+psycopg://postgres:Yg0vCNCSfVTNpicWso_EBwDqvk4Vd9V1@f83b3631-742d-441d-b8bd-9cc88f57ddd6.166864bd-1d76-4532-828e-781c48d19b1f.europe-west2.alloydb-psc.goog.:5432/handover_prod?sslmode=require}"
+ensure_secret "DATABASE_URL_PROD" "${PROD_DB_URL}"
+
+PROD_ADMIN_TOKEN="${ADMIN_TOKEN_PROD:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-admin-prod-$(date +%s)")}"
+ensure_secret "ADMIN_TOKEN_PROD" "${PROD_ADMIN_TOKEN}"
+
+PROD_RELAY_TOKEN="${RELAY_WEBHOOK_TOKEN_PROD:-$(openssl rand -hex 24 2>/dev/null || python -c "import secrets; print(secrets.token_hex(24))" 2>/dev/null || echo "sec-relay-prod-$(date +%s)")}"
+ensure_secret "RELAY_WEBHOOK_TOKEN_PROD" "${PROD_RELAY_TOKEN}"
+
+# 3. Backwards-compatible legacy secrets (aliases/fallbacks)
+DEFAULT_DB_URL="${DATABASE_URL:-${DEV_DB_URL}}"
 ensure_secret "DATABASE_URL" "${DEFAULT_DB_URL}"
+
+LEGACY_ADMIN_TOKEN="${ADMIN_TOKEN:-${DEV_ADMIN_TOKEN}}"
+ensure_secret "ADMIN_TOKEN" "${LEGACY_ADMIN_TOKEN}"
+
+LEGACY_RELAY_TOKEN="${RELAY_WEBHOOK_TOKEN:-${DEV_RELAY_TOKEN}}"
+ensure_secret "RELAY_WEBHOOK_TOKEN" "${LEGACY_RELAY_TOKEN}"
 
 # 4. GITHUB_DISPATCH_PAT
 DEFAULT_PAT="${GITHUB_DISPATCH_PAT:-dummy-pat-to-be-updated}"
