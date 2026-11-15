@@ -81,6 +81,11 @@ class HandoverService:
                 notes.append(f"[{machine}] {note_text}")
         return notes
 
+    def _normalize_report_content(self, content: ReportContent) -> ReportContent:
+        """Normalize generated report content by cleaning markdown heading artifacts."""
+        content.summary = content.summary.remove_prefix("# ").strip()
+        return content
+
     def generate_report(self, shift_key: str) -> ReportResponse:
         """Generate, validate, and persist a handover report for a shift."""
         start_time = time.perf_counter()
@@ -117,6 +122,7 @@ class HandoverService:
                 )
                 if not isinstance(content, ReportContent):
                     content = ReportContent.model_validate(content)
+                content = self._normalize_report_content(content)
                 tokens = getattr(content, "tokens", None) or getattr(content, "token_count", None)
                 if tokens is not None:
                     gen_span.set_attribute("tokens", tokens)
@@ -144,6 +150,7 @@ class HandoverService:
                     )
                     if not isinstance(content, ReportContent):
                         content = ReportContent.model_validate(content)
+                    content = self._normalize_report_content(content)
                     tokens = getattr(content, "tokens", None) or getattr(content, "token_count", None)
                     if tokens is not None:
                         fallback_span.set_attribute("tokens", tokens)
