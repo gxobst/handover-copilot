@@ -1,0 +1,14 @@
+{
+  "name": "shift-handover-copilot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shift Handover Copilot - Industrial Plant Edition",
+  "scripts": {
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:frontend": "npm --prefix frontend test",
+    "lint:frontend": "npm --prefix frontend run lint"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
+  }
+}

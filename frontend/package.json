@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "npm run codegen:check && vitest run",
+    "test:e2e": "playwright test -c ../e2e/playwright.config.ts",
     "lint": "eslint .",
     "codegen": "openapi-typescript ../openapi.yaml --root-types --root-types-no-schema-prefix --root-types-keep-casing -o src/types/api.ts",
     "codegen:check": "openapi-typescript ../openapi.yaml --root-types --root-types-no-schema-prefix --root-types-keep-casing --check -o src/types/api.ts"
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
