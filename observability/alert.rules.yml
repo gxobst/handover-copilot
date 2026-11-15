@@ -1,0 +1,42 @@
+groups:
+  - name: handover-user-impact-alerts
+    rules:
+      - alert: HandoverGenerationFailureRateHigh
+        expr: |
+          (
+            sum by (service, environment, version) (rate(handover_reports_generated_total{outcome="error"}[10m]))
+            /
+            sum by (service, environment, version) (rate(handover_reports_generated_total[10m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+          service: "{{ $labels.service }}"
+          environment: "{{ $labels.environment }}"
+          version: "{{ $labels.version }}"
+          owner: "shift-operations"
+        annotations:
+          summary: "High report generation failure rate in {{ $labels.environment }}"
+          description: "Shift leads cannot generate handovers in environment {{ $labels.environment }} (version {{ $labels.version }}) — the incoming shift starts blind."
+          dashboard_url: "http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment={{ $labels.environment }}&var-version={{ $labels.version }}"
+          runbook_url: "https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md"
+
+      - alert: HandoverHttpErrorRateHigh
+        expr: |
+          (
+            sum by (service, environment, version) (rate(handover_http_requests_total{status_code=~"5.."}[5m]))
+            /
+            sum by (service, environment, version) (rate(handover_http_requests_total[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.service }}"
+          environment: "{{ $labels.environment }}"
+          version: "{{ $labels.version }}"
+          owner: "shift-operations"
+        annotations:
+          summary: "High HTTP 5xx server error rate in {{ $labels.environment }}"
+          description: "Over 10% of HTTP requests to service {{ $labels.service }} in {{ $labels.environment }} (version {{ $labels.version }}) are returning 5xx server errors."
+          dashboard_url: "http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment={{ $labels.environment }}&var-version={{ $labels.version }}"
+          runbook_url: "https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md"

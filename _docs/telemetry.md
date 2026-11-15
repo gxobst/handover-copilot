@@ -126,5 +126,53 @@ Telemetry packets flow securely through private Google Cloud networking directly
 ### Automation Scripts
 
 - Provisioning: `infra/08-observability-stack.sh` & `infra/08-observability-stack.ps1`
-- Live Verification: `scripts/verify_deployed_observability.py`
+- Live Observability Verification: `scripts/verify_deployed_observability.py`
+- Prometheus Alert Verification: `scripts/verify_alerts.py`
+
+### User-Impact Failure Alerting Rules (Issue #38)
+
+Alert rules are defined in `observability/alert.rules.yml` and mounted read-only (`:ro`) into the Prometheus container at `/etc/prometheus/alert.rules.yml`. Prometheus evaluates rules every 5 seconds. Rules focus on user impact (failed handovers, HTTP 5xx server errors) rather than raw machine saturation metrics (CPU, RAM).
+
+#### Alert Rule Group: `handover-user-impact-alerts`
+
+1. **`HandoverGenerationFailureRateHigh` (Critical)**
+   - **Condition:** Report generation failure rate exceeds 20% (`> 0.2`) over a 10-minute sliding window, sustained for 5 minutes (`for: 5m`).
+   - **PromQL:**
+     ```promql
+     (
+       sum by (service, environment, version) (rate(handover_reports_generated_total{outcome="error"}[10m]))
+       /
+       sum by (service, environment, version) (rate(handover_reports_generated_total[10m]))
+     ) > 0.2
+     ```
+   - **Labels:** `severity: critical`, `service: "{{ $labels.service }}"`, `environment: "{{ $labels.environment }}"`, `version: "{{ $labels.version }}"`, `owner: "shift-operations"`.
+   - **Annotations:**
+     - `summary`: "High report generation failure rate in {{ $labels.environment }}"
+     - `description`: "Shift leads cannot generate handovers in environment {{ $labels.environment }} (version {{ $labels.version }}) — the incoming shift starts blind."
+     - `dashboard_url`: `http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment={{ $labels.environment }}&var-version={{ $labels.version }}`
+     - `runbook_url`: `https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md`
+
+2. **`HandoverHttpErrorRateHigh` (Warning)**
+   - **Condition:** HTTP 5xx server error rate exceeds 10% (`> 0.1`) over a 5-minute sliding window, sustained for 5 minutes (`for: 5m`).
+   - **PromQL:**
+     ```promql
+     (
+       sum by (service, environment, version) (rate(handover_http_requests_total{status_code=~"5.."}[5m]))
+       /
+       sum by (service, environment, version) (rate(handover_http_requests_total[5m]))
+     ) > 0.1
+     ```
+   - **Labels:** `severity: warning`, `service: "{{ $labels.service }}"`, `environment: "{{ $labels.environment }}"`, `version: "{{ $labels.version }}"`, `owner: "shift-operations"`.
+   - **Annotations:**
+     - `summary`: "High HTTP 5xx server error rate in {{ $labels.environment }}"
+     - `description`: "Over 10% of HTTP requests to service {{ $labels.service }} in {{ $labels.environment }} (version {{ $labels.version }}) are returning 5xx server errors."
+     - `dashboard_url`: `http://34.153.185.34:3000/d/handover-app-metrics/shift-handover-application-metrics?var-environment={{ $labels.environment }}&var-version={{ $labels.version }}`
+     - `runbook_url`: `https://github.com/gxobst/handover-copilot/blob/main/_docs/manual-testing-guide.md`
+
+#### Prometheus Live Rules API
+
+Rule health and state can be queried directly via Prometheus HTTP API:
+- Endpoint: `GET http://34.153.185.34:9090/api/v1/rules`
+- Active health status: `{"status": "success", "data": {"groups": [...]}}` where rule health is `"ok"`.
+
 

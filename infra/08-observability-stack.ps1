@@ -111,6 +111,7 @@ $configFiles = @(
     "docker-compose.yml",
     "otel-collector-config.yaml",
     "prometheus.yml",
+    "alert.rules.yml",
     "loki-config.yaml",
     "tempo-config.yaml",
     "datasources.yaml",
@@ -137,6 +138,7 @@ chmod -R 755 /opt/observability
 echo "==> [Observability Startup] Starting containers via Docker Compose..."
 cd /opt/observability
 docker compose -f /opt/observability/docker-compose.yml up -d
+docker compose -f /opt/observability/docker-compose.yml restart prometheus || true
 
 cat <<'SERVICE_EOF' > /etc/systemd/system/observability-stack.service
 [Unit]
@@ -200,6 +202,10 @@ if (-not $vmExists) {
         --zone=$Zone `
         --project=$ProjectId `
         --metadata-from-file="startup-script=$tempStartup"
+    if ($status -eq "RUNNING") {
+        Write-Host "Syncing updated configuration files to running VM and reloading Prometheus..."
+        Get-Content $tempStartup -Raw | & $gcloudCmd compute ssh $VmName --zone=$Zone --project=$ProjectId --command="sudo bash -s"
+    }
 }
 
 Remove-Item -Path $tempStartup -Force -ErrorAction SilentlyContinue

@@ -102,6 +102,7 @@ CONFIG_FILES=(
   "docker-compose.yml"
   "otel-collector-config.yaml"
   "prometheus.yml"
+  "alert.rules.yml"
   "loki-config.yaml"
   "tempo-config.yaml"
   "datasources.yaml"
@@ -129,6 +130,7 @@ chmod -R 755 /opt/observability
 echo "==> [Observability Startup] Starting containers via Docker Compose..."
 cd /opt/observability
 docker compose -f /opt/observability/docker-compose.yml up -d
+docker compose -f /opt/observability/docker-compose.yml restart prometheus || true
 
 # Create systemd persistence service
 cat <<'SERVICE_EOF' > /etc/systemd/system/observability-stack.service
@@ -185,6 +187,11 @@ else
     --zone="${ZONE}" \
     --project="${PROJECT_ID}" \
     --metadata-from-file="startup-script=${STARTUP_SCRIPT}"
+  if [[ "${STATUS}" == "RUNNING" ]]; then
+    echo "Syncing updated configuration files to running VM and reloading Prometheus..."
+    gcloud compute ssh "${VM_NAME}" --zone="${ZONE}" --project="${PROJECT_ID}" \
+      --command="sudo bash -s" < "${STARTUP_SCRIPT}" || true
+  fi
 fi
 
 INTERNAL_IP="$(gcloud compute instances describe "${VM_NAME}" --zone="${ZONE}" --project="${PROJECT_ID}" --format='value(networkInterfaces[0].networkIP)')"
