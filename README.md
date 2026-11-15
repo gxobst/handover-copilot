@@ -61,54 +61,63 @@ During shift transitions in manufacturing plants (early, late, and night shifts)
 
 ## 🏗️ Architecture and Tech Stack
 
-```
-                                  +--------------------------------------------------------+
-                                  |                       USERS                            |
-                                  +--------------------------------------------------------+
-                                              |                                |
-                                              v                                v
-                                   [ Cloud Run: Dev ]                 [ Cloud Run: Prod ]
-                                 (handover-dev: min=0)              (handover-prod: min=0)
-                                              |                                |
-                                              +---------------+----------------+
-                                                              |
-                                                              v
-+--------------------------+       FastAPI Application (Single Unified Docker Container)
-|  React 18 + TypeScript   |  <-->  - Vite static build served directly at /
-|  Tailwind CSS + shadcn   |        - REST API at /api (events, reports, admin, health)
-|  TanStack React Query    |        - Telemetry Middleware (W3C trace correlation, PII filter)
-+--------------------------+                                  |
-                                                              +-------------------------------+
-                                                              |                               |
-                                                              v                               v
-                                                   [ AlloyDB PostgreSQL 18 ]         [ Vertex AI (Gemini) ]
-                                                   Direct VPC Egress (PSC)            Primary: gemini-3.5-flash-lite
-                                                   Isolated handover_dev/prod         Fallback: gemini-3.1-flash-lite
-                                                              |
-                                                              v
-                                              OTLP / HTTPS Direct VPC Egress
-                                                              v
-+-----------------------------------------------------------------------------------------------------+
-|                      Observability Stack (Compute Engine: handover-observability)                   |
-|                                                                                                     |
-|   +--------------------+     +------------------+     +---------------+     +-------------------+   |
-|   |   OTel Collector   | --> | Prometheus (TSDB)| --> | Grafana Cloud | <-- | Loki (Logs)       |   |
-|   |   (Port 4317/4318) |     | (Alert Rules API)|     | (Dashboard)   |     | Tempo (Traces)    |   |
-|   +--------------------+     +------------------+     +---------------+     +-------------------+   |
-|                                        |                                                            |
-+----------------------------------------|------------------------------------------------------------+
-                                         |
-                                         v
-                         +-------------------------------+
-                         |    On-Call Incident Poller    |
-                         |   (on-call-engineer/daemon)   |
-                         +-------------------------------+
-                                         | (Alert Firing)
-                                         v
-                         +-------------------------------+
-                         |     Headless Coding Agent     |
-                         |   (Investigate -> Fix -> Test)|
-                         +-------------------------------+
+```mermaid
+flowchart TD
+    subgraph Clients["Users & Operators"]
+        Operator["Machine Operator\n(Log Shift Events)"]
+        Lead["Shift Lead\n(Generate & Review Handover)"]
+    end
+
+    subgraph GCP["Google Cloud Platform (europe-west2)"]
+        subgraph CloudRun["Cloud Run (Scale-to-Zero)"]
+            DevApp["handover-dev\n(Development)"]
+            ProdApp["handover-prod\n(Production)"]
+        end
+
+        subgraph Container["Unified Application Container (FastAPI + React)"]
+            Frontend["React 18 + Vite UI\n(Industrial High-Contrast UX)"]
+            API["FastAPI REST API\n(/api/events, /api/reports)"]
+            TelemetryMW["Telemetry Middleware\n(W3C Tracing & PII Redaction)"]
+            Frontend <--> API
+            API --- TelemetryMW
+        end
+
+        subgraph Storage["Databases & Foundation Models"]
+            AlloyDB[("AlloyDB PostgreSQL 18\n(Direct VPC Egress / PSC)")]
+            VertexAI["Google Vertex AI\nPrimary: gemini-3.5-flash-lite\nFallback: gemini-3.1-flash-lite"]
+        end
+    end
+
+    subgraph ObservabilityVM["Observability Host (handover-observability VM)"]
+        OTelCol["OpenTelemetry Collector\n(OTLP / Ports 4317, 4318)"]
+        Prometheus[("Prometheus TSDB\n(Alert Rules & Metrics)")]
+        Loki[("Loki (Logs)")]
+        Tempo[("Tempo (Traces)")]
+        Grafana["Grafana Dashboards\n(Bidirectional Metric & Trace Links)"]
+
+        OTelCol --> Prometheus
+        OTelCol --> Loki
+        OTelCol --> Tempo
+        Prometheus --> Grafana
+        Loki --> Grafana
+        Tempo --> Grafana
+    end
+
+    subgraph OnCall["Autonomous On-Call Incident Responder"]
+        Poller["Alert Poller Daemon (on-call-engineer)\nPolls /api/v1/alerts every 60s"]
+        Agent["Headless Coding Agent (Gemini Model)\nInvestigate -> Reproduce -> Fix -> Test -> Commit"]
+
+        Prometheus -. "Firing Alert" .-> Poller
+        Poller ==> Agent
+        Agent -. "Minimal Fix & Tests" .-> Container
+    end
+
+    Operator --> CloudRun
+    Lead --> CloudRun
+    CloudRun --> Container
+    Container --> AlloyDB
+    Container --> VertexAI
+    TelemetryMW -- "OTLP / HTTPS" --> OTelCol
 ```
 
 ### Technology Highlights
@@ -344,20 +353,13 @@ A core design principle of Shift Handover Copilot is **strict zero-idle budget a
 
 This repository was planned, built, tested, and maintained by an autonomous agent team following [`_docs/process.md`](file:///E:/Project/AI%20Dev%20Tools%20Zoomcamp/shift-handover-copilot/_docs/process.md):
 
-```
-[ Raw User Request ]
-        |
-        v
-[ Product Manager Agent ]  --> Grooms issue using _docs/task-template.md
-        |                      (Goal / Acceptance criteria / Out of scope / Constraints)
-        v
-[ Software Engineer Agent ] --> Implements code + tests, commits referencing #issue,
-        |                      posts summary comment, leaves issue open.
-        v
-[ QA Engineer Agent ]      --> Fresh context, validates running code against criteria,
-        |                      runs test suites, posts verdict (## QA: PASS / ## QA: FAIL).
-        v
-[ Orchestrator ]           --> Closes issue ONLY upon QA: PASS and updates plan.md.
+```mermaid
+flowchart TD
+    UserReq["User Request / Raw Feature"] --> PM["Product Manager Subagent\n(Groom issue using _docs/task-template.md)"]
+    PM -->|Groomed Issue: Goal, AC, Out of Scope, Constraints| SWE["Software Engineer Subagent\n(Implement code + tests, commit referencing #issue)"]
+    SWE -->|Implementation Summary Comment| QA["QA Engineer Subagent\n(Fresh session, test running system against ACs)"]
+    QA -->|Verdict: ## QA: FAIL| SWE
+    QA -->|Verdict: ## QA: PASS| Orch["Orchestrator\n(Close GitHub Issue & update plan.md)"]
 ```
 
 Review the [GitHub Issues Backlog](https://github.com/gxobst/handover-copilot/issues?q=is%3Aissue+is%3Aclosed) to inspect the public record of PM grooming, SWE commits, and QA verdict comments across all 39 delivered issues.

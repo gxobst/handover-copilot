@@ -6,39 +6,54 @@ The `on-call-engineer` package provides an autonomous daemon that continuously m
 
 ## Architecture Overview
 
-```
-                      ┌────────────────────────────────────────┐
-                      │ Observability Alerts Endpoint          │
-                      │ (Prometheus / Alertmanager / Mock File)│
-                      └───────────────────┬────────────────────┘
-                                          │ Poll tick (default: 60s)
-                                          ▼
-                      ┌────────────────────────────────────────┐
-                      │ AlertPoller (poller.py)                │
-                      │  - Filters state == "firing"           │
-                      │  - Computes alert fingerprint          │
-                      │  - Checks in-flight & cooldown state   │
-                      │  - Sequential dispatch queue           │
-                      │  - Detects resolution transitions      │
-                      └───────────────────┬────────────────────┘
-                                          │ Firing alert ready
-                                          ▼
-                      ┌────────────────────────────────────────┐
-                      │ AgentDispatcher (dispatcher.py)        │
-                      │  - Exact verbatim system prompt        │
-                      │  - Structured incident context         │
-                      │  - Subprocess execution or dry-run     │
-                      └───────────────────┬────────────────────┘
-                                          │
-                                          ▼
-                      ┌────────────────────────────────────────┐
-                      │ Headless Coding Agent                  │
-                      │ (e.g. agy, gemini, claude)             │
-                      │  - Reads code & reproduces incident    │
-                      │  - Makes minimal bug fix               │
-                      │  - Runs backend tests to verify        │
-                      │  - Commits fix or explains false +ve   │
-                      └────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Prometheus["Observability Alerts Source"]
+        AlertsAPI["Prometheus Alert API (/api/v1/alerts)\n(or Alertmanager / Mock Fixture)"]
+    end
+
+    subgraph Poller["Alert Poller Daemon (poller.py)"]
+        Tick["Timer Tick (every 60s)"]
+        Query["Fetch & Parse Active Alerts"]
+        Filter{"Alert State == 'firing'?"}
+        Dedupe{"In-Flight or\nWithin Cooldown Window?"}
+        Track["Update Tracked Alert State\n(Fingerprint, Active Timestamp)"]
+
+        Tick --> Query
+        Query --> Filter
+        Filter -- Yes --> Dedupe
+        Filter -- "No / Resolved" --> Track
+        Dedupe -- "New / Cooldown Expired" --> Track
+        Dedupe -- "Duplicate (Active)" --> LogDrop["Log Duplicate & Skip"]
+    end
+
+    subgraph Dispatcher["Agent Dispatcher (dispatcher.py)"]
+        Assemble["Assemble Full Prompt:\n- Verbatim On-Call System Prompt\n- Structured Incident Telemetry Context\n- JSON Alert Payload"]
+        ExecMode{"Dry Run Mode?"}
+        Simulate["Log Simulated Execution (Exit 0)"]
+        Execute["Spawn Headless Coding Agent\n(e.g. Gemini / LLM Subprocess)"]
+
+        Track ==> Assemble
+        Assemble --> ExecMode
+        ExecMode -- Yes --> Simulate
+        ExecMode -- No --> Execute
+    end
+
+    subgraph Agent["Autonomous On-Call Engineer"]
+        Investigate["1. Investigate Root Cause & Read Code"]
+        Reproduce["2. Reproduce Incident Failure with Tests"]
+        Fix["3. Make Smallest Code Correction"]
+        Verify["4. Run Backend Tests to Verify"]
+        Commit["5. Commit Fix or Document False Positive"]
+
+        Execute ==> Investigate
+        Investigate --> Reproduce
+        Reproduce --> Fix
+        Fix --> Verify
+        Verify --> Commit
+    end
+
+    AlertsAPI -. Polled Response .-> Query
 ```
 
 ---
