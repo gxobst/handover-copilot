@@ -1,0 +1,138 @@
+name: Deploy Dev
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: boxwood-scope-292916
+  REGION: europe-west2
+  ARTIFACT_REPO: handover
+  SERVICE_NAME: handover-dev
+  WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com
+  CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
+
+jobs:
+  deploy-dev:
+    name: Build, Migrate, and Deploy to Dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication
+        run: |
+          gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+
+      - name: Compute image tag
+        id: image-tag
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+          TAG="${TIMESTAMP}-${SHORT_SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "IMAGE_TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Build and push container image
+        env:
+          TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          IMAGE_BASE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/app"
+          docker build \
+            -t "${IMAGE_BASE}:${TAG}" \
+            -t "${IMAGE_BASE}:latest" \
+            .
+          docker push "${IMAGE_BASE}:${TAG}"
+          docker push "${IMAGE_BASE}:latest"
+
+      - name: Update and run database migration job
+        env:
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+          GCP_PROJECT: ${{ env.PROJECT_ID }}
+          GCP_REGION: ${{ env.REGION }}
+        run: |
+          chmod +x ./infra/06-cloud-run-migrate-job.sh
+          ./infra/06-cloud-run-migrate-job.sh
+          gcloud run jobs execute handover-migrate \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --wait
+
+      - name: Deploy to Cloud Run Dev
+        env:
+          TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/app:${TAG}"
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image="${IMAGE_URI}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" \
+            --min-instances=0 \
+            --max-instances=2 \
+            --cpu=1 \
+            --memory=512Mi \
+            --timeout=120 \
+            --port=8000 \
+            --allow-unauthenticated \
+            --set-cloudsql-instances="${{ env.CLOUDSQL_INSTANCE }}" \
+            --set-secrets=DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest \
+            --set-env-vars="APP_ENV=dev,APP_VERSION=${TAG},GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+
+      - name: Verify live endpoint health
+        id: health-check
+        run: |
+          SERVICE_URL="$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          echo "service_url=${SERVICE_URL}" >> "$GITHUB_OUTPUT"
+          echo "Checking health at ${SERVICE_URL}/api/healthz..."
+          
+          HEALTHY=false
+          for i in {1..12}; do
+            HTTP_CODE="$(curl -s -o /tmp/health.json -w "%{http_code}" "${SERVICE_URL}/api/healthz" || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              HEALTHY=true
+              cat /tmp/health.json
+              echo ""
+              break
+            fi
+            echo "Waiting for healthz (attempt $i, status: ${HTTP_CODE})..."
+            sleep 5
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "Health verification failed with status: ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Generate deployment step summary
+        run: |
+          SERVICE_URL="$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          REVISION="$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.latestReadyRevisionName)")"
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 🚀 Deployment to Dev Successful
+
+          - **Service:** \`${{ env.SERVICE_NAME }}\`
+          - **Environment:** \`dev\`
+          - **Region:** \`${{ env.REGION }}\`
+          - **Image Tag:** \`${{ steps.image-tag.outputs.tag }}\`
+          - **Cloud Run Revision:** \`${REVISION}\`
+          - **URL:** [${SERVICE_URL}](${SERVICE_URL})
+          - **Health Endpoint:** [${SERVICE_URL}/api/healthz](${SERVICE_URL}/api/healthz)
+          EOF

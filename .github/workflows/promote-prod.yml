@@ -1,0 +1,135 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      override_image_tag:
+        description: "Optional: override specific image tag to promote (leave empty to promote currently verified dev image)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: boxwood-scope-292916
+  REGION: europe-west2
+  ARTIFACT_REPO: handover
+  DEV_SERVICE: handover-dev
+  PROD_SERVICE: handover-prod
+  WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com
+  CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
+
+jobs:
+  promote-prod:
+    name: Promote Verified Image to Production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.smoke-check.outputs.service_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve verified image from Dev
+        id: resolve-image
+        run: |
+          OVERRIDE_TAG="${{ github.event.inputs.override_image_tag }}"
+          if [ -n "${OVERRIDE_TAG}" ]; then
+            IMAGE_TAG="${OVERRIDE_TAG}"
+            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/app:${IMAGE_TAG}"
+            echo "Using manual override image tag: ${IMAGE_TAG}"
+          else
+            IMAGE_URI="$(gcloud run services describe "${{ env.DEV_SERVICE }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(spec.template.spec.containers[0].image)")"
+            IMAGE_TAG="${IMAGE_URI##*:}"
+            echo "Resolved verified dev image: ${IMAGE_URI} (tag: ${IMAGE_TAG})"
+          fi
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Run database migration job for Production
+        env:
+          GCP_PROJECT: ${{ env.PROJECT_ID }}
+          GCP_REGION: ${{ env.REGION }}
+          IMAGE_TAG: ${{ steps.resolve-image.outputs.image_tag }}
+        run: |
+          chmod +x ./infra/06-cloud-run-migrate-job.sh
+          ./infra/06-cloud-run-migrate-job.sh
+          gcloud run jobs execute handover-migrate \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --wait
+
+      - name: Deploy identical artifact to Production
+        env:
+          IMAGE_URI: ${{ steps.resolve-image.outputs.image_uri }}
+          TAG: ${{ steps.resolve-image.outputs.image_tag }}
+        run: |
+          gcloud run deploy "${{ env.PROD_SERVICE }}" \
+            --image="${IMAGE_URI}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" \
+            --min-instances=0 \
+            --max-instances=2 \
+            --cpu=1 \
+            --memory=512Mi \
+            --timeout=120 \
+            --port=8000 \
+            --allow-unauthenticated \
+            --set-cloudsql-instances="${{ env.CLOUDSQL_INSTANCE }}" \
+            --set-secrets=DATABASE_URL=DATABASE_URL:latest,ADMIN_TOKEN=ADMIN_TOKEN:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN:latest \
+            --set-env-vars="APP_ENV=prod,APP_VERSION=${TAG},GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+
+      - name: Perform production smoke check
+        id: smoke-check
+        run: |
+          PROD_URL="$(gcloud run services describe "${{ env.PROD_SERVICE }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          echo "service_url=${PROD_URL}" >> "$GITHUB_OUTPUT"
+          echo "Verifying production health check at ${PROD_URL}/api/healthz..."
+
+          HEALTHY=false
+          for i in {1..12}; do
+            HTTP_CODE="$(curl -s -o /tmp/health.json -w "%{http_code}" "${PROD_URL}/api/healthz" || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              HEALTHY=true
+              cat /tmp/health.json
+              echo ""
+              break
+            fi
+            echo "Waiting for production healthz (attempt $i, status: ${HTTP_CODE})..."
+            sleep 5
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "Production health verification failed with status: ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Generate promotion step summary
+        run: |
+          PROD_URL="$(gcloud run services describe "${{ env.PROD_SERVICE }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          REVISION="$(gcloud run services describe "${{ env.PROD_SERVICE }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.latestReadyRevisionName)")"
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 🌟 Promotion to Production Successful
+
+          - **Service:** \`${{ env.PROD_SERVICE }}\`
+          - **Environment:** \`prod\`
+          - **Region:** \`${{ env.REGION }}\`
+          - **Promoted Image Tag:** \`${{ steps.resolve-image.outputs.image_tag }}\`
+          - **Production Revision:** \`${REVISION}\`
+          - **Production URL:** [${PROD_URL}](${PROD_URL})
+          - **Health Endpoint:** [${PROD_URL}/api/healthz](${PROD_URL}/api/healthz)
+          EOF

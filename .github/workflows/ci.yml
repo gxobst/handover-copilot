@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --dev
+
+      - name: Run backend unit tests
+        working-directory: backend
+        env:
+          LLM_BACKEND: fake
+          APP_ENV: test
+        run: uv run pytest tests
+
+  frontend-test:
+    name: Frontend Component Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+  integration-and-e2e:
+    name: Compose Integration & Playwright E2E
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install root dependencies & Playwright
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build and start Docker Compose stack
+        run: |
+          docker compose up -d --build --wait
+
+      - name: Verify service health
+        run: |
+          for i in {1..30}; do
+            if curl -s -f http://127.0.0.1:8000/api/healthz; then
+              echo "Compose service is healthy!"
+              break
+            fi
+            echo "Waiting for service to be healthy (attempt $i)..."
+            sleep 2
+          done
+
+      - name: Run Docker Compose integration scenarios
+        run: |
+          python scripts/test_compose_integration.py --base-url http://127.0.0.1:8000
+
+      - name: Run Playwright E2E tests
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          npm run test:e2e
+
+      - name: Stop and clean up Docker Compose
+        if: always()
+        run: |
+          docker compose down -v

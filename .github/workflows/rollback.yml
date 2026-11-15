@@ -1,0 +1,89 @@
+name: Rollback Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_revision:
+        description: "Target Cloud Run revision name to direct 100% traffic to (e.g. handover-prod-00001-abc)"
+        required: true
+      service_name:
+        description: "Cloud Run service to roll back"
+        required: true
+        default: "handover-prod"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: boxwood-scope-292916
+  REGION: europe-west2
+  WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
+
+jobs:
+  rollback:
+    name: Instant Traffic Shift Rollback
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Shift 100% traffic to target revision
+        run: |
+          SERVICE="${{ github.event.inputs.service_name }}"
+          REVISION="${{ github.event.inputs.target_revision }}"
+          echo "Updating traffic on service '${SERVICE}' to revision '${REVISION}'=100%..."
+          gcloud run services update-traffic "${SERVICE}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --to-revisions="${REVISION}=100"
+
+      - name: Verify service health after rollback
+        run: |
+          SERVICE="${{ github.event.inputs.service_name }}"
+          SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          echo "Verifying health check on rolled-back revision at ${SERVICE_URL}/api/healthz..."
+          
+          HEALTHY=false
+          for i in {1..12}; do
+            HTTP_CODE="$(curl -s -o /tmp/health.json -w "%{http_code}" "${SERVICE_URL}/api/healthz" || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              HEALTHY=true
+              cat /tmp/health.json
+              echo ""
+              break
+            fi
+            echo "Waiting for healthz (attempt $i, status: ${HTTP_CODE})..."
+            sleep 3
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "Rollback verification failed with HTTP status: ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Generate rollback step summary
+        run: |
+          SERVICE="${{ github.event.inputs.service_name }}"
+          REVISION="${{ github.event.inputs.target_revision }}"
+          SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## 🔄 Rollback Successful
+
+          - **Service:** \`${SERVICE}\`
+          - **Active Revision:** \`${REVISION}\` (100% traffic)
+          - **Service URL:** [${SERVICE_URL}](${SERVICE_URL})
+          - **Health Endpoint:** [${SERVICE_URL}/api/healthz](${SERVICE_URL}/api/healthz)
+          EOF
