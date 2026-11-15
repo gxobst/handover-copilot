@@ -15,6 +15,11 @@ def create_db_engine(url: str | None = None, **kwargs: Any) -> Engine:
     connect_args = kwargs.pop("connect_args", {})
     if database_url.startswith("sqlite"):
         connect_args.setdefault("check_same_thread", False)
+        db_file = database_url.removeprefix("sqlite:///").split("?")[0]
+        if db_file and not db_file.startswith(":memory:"):
+            from pathlib import Path
+
+            Path(db_file).parent.mkdir(parents=True, exist_ok=True)
 
     return create_engine(
         database_url,

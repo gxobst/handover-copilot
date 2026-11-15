@@ -239,6 +239,9 @@ class RelayService:
 _SHARED_COOLDOWN_CACHE: dict[str, float] = {}
 
 
+_SHARED_MOCK_DISPATCHER = MockGitHubDispatcher()
+
+
 def get_shared_cooldown_cache() -> dict[str, float]:
     """Dependency provider returning the module-level shared cooldown cache."""
     return _SHARED_COOLDOWN_CACHE
@@ -247,7 +250,10 @@ def get_shared_cooldown_cache() -> dict[str, float]:
 def get_github_dispatcher(
     settings: Settings = Depends(get_settings),
 ) -> GitHubDispatcher:
-    """Dependency provider returning the default HttpGitHubDispatcher."""
+    """Dependency provider returning HttpGitHubDispatcher or MockGitHubDispatcher when offline."""
+    pat = (settings.github_dispatch_pat or "").strip().lower()
+    if not pat or pat in ("fake", "mock", "test"):
+        return _SHARED_MOCK_DISPATCHER
     return HttpGitHubDispatcher(settings=settings)
 
 

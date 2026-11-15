@@ -62,6 +62,9 @@ def run_migrations_online() -> None:
     connect_args = {}
     if configuration["sqlalchemy.url"].startswith("sqlite"):
         connect_args["check_same_thread"] = False
+        db_file = configuration["sqlalchemy.url"].removeprefix("sqlite:///").split("?")[0]
+        if db_file and not db_file.startswith(":memory:"):
+            Path(db_file).parent.mkdir(parents=True, exist_ok=True)
 
     connectable = engine_from_config(
         configuration,

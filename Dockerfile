@@ -41,6 +41,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Ensure data directory exists for SQLite database persistence
+RUN mkdir -p /app/data
+
 # Copy dependency definition files first for efficient Docker layer caching
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
@@ -58,7 +61,7 @@ COPY --from=frontend-builder /build/frontend/dist /app/static
 EXPOSE 8000
 
 # Create an entrypoint script that applies database migrations and launches Uvicorn
-RUN printf '#!/bin/sh\nset -e\necho "Applying database migrations..."\nuv run alembic upgrade head || true\necho "Starting Shift Handover Copilot on ${HOST:-0.0.0.0}:${PORT:-8000}..."\nexec uv run uvicorn app.main:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}"\n' > /app/entrypoint.sh \
+RUN printf '#!/bin/sh\nset -e\nmkdir -p /app/data\necho "Applying database migrations..."\nuv run alembic upgrade head || true\necho "Starting Shift Handover Copilot on ${HOST:-0.0.0.0}:${PORT:-8000}..."\nexec uv run uvicorn app.main:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}"\n' > /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]

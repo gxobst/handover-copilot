@@ -1,0 +1,27 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: handover-copilot
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - APP_ENV=production
+      - LLM_BACKEND=fake
+      - ADMIN_TOKEN=dev-admin-secret-key-12345
+      - RELAY_WEBHOOK_TOKEN=dev-relay-token-secret-123
+      - DATABASE_URL=sqlite:///./data/handover.db
+    volumes:
+      - handover_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  handover_data:
+    driver: local
