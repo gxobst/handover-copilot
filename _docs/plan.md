@@ -809,4 +809,28 @@ To enable deterministic local evaluation, production-grade container orchestrati
 4. **Automated Orchestration Runners**:
    - `scripts/run-integration-tests.ps1` (Windows PowerShell) and `scripts/run-integration-tests.sh` (POSIX bash) automate building stack via `docker compose up -d --build`, waiting for healthy status, executing test scenarios, testing persistence across restart, and clean teardown via `docker compose down -v`.
 
+---
+
+## 15. Playwright Browser End-to-End Test Suite Architecture (Issue #26)
+
+### Decision Context
+To verify full-stack user journeys through an actual browser running against the production container stack (`docker-compose.yaml`), an automated Playwright test suite was introduced in the `e2e/` folder at the repository root.
+
+### Architecture & Resolution
+1. **Playwright Configuration (`e2e/playwright.config.ts`)**:
+   - Configured with `baseURL: process.env.BASE_URL || 'http://127.0.0.1:8000'`.
+   - Uses headless Chromium by default with desktop viewport (1440x900).
+   - Single-worker serial execution (`fullyParallel: false`, `workers: 1`) to guarantee deterministic step sequencing.
+   - Captures screenshots and W3C trace artifacts on failure (`screenshot: 'only-on-failure'`, `trace: 'retain-on-failure'`).
+2. **End-to-End User Journeys (`e2e/handover.spec.ts`)**:
+   - **Journey 1: Navigation & Initial Render**: Verifies application title, industrial edition badge, shift key indicator format `YYYY-MM-DD-(early|late|night)`, and dynamic data reloading on shift toggles.
+   - **Journey 2: Event Logging & Real-Time List Updates**: Verifies client-side validation blocking empty submissions without network requests, valid form submission, input clearing, transient success feedback, immediate DOM list updates, and category badge styling (amber for downtime, red for safety).
+   - **Journey 3: Handover Report Generation & Rendering**: Verifies the zero-events disabled state with helper message, generation loading state with animated spinner, and report card rendering containing metadata bar (version, shift key, event count, model used), synthesized Executive Summary, Safety Notes section, and Open Actions table with priority badges (`high`/`medium`/`low`), action descriptions, and assigned owners.
+   - **Journey 4: Report History Navigation & Version Snapshots**: Verifies tab switching to Report History, listing of generated reports with version and timestamp, inspection of immutable past snapshots, and version incrementing upon regeneration ("Version 1" -> "Version 2").
+   - **Journey 5: Admin & Model Settings View**: Verifies Admin Settings header trigger, RFC 9457 error banner (401 Unauthorized) on invalid token keeping modal locked, unlocking with valid token `dev-admin-secret-key-12345`, model configuration cards, regex pattern validation on model identifiers, and successful saving with transient confirmation.
+3. **Orchestration Runner Scripts**:
+   - `scripts/run-e2e-tests.ps1` (PowerShell) and `scripts/run-e2e-tests.sh` (Bash) automate detecting or starting the container stack, waiting for healthy status via `/api/healthz`, running the Playwright test suite, and cleaning up container resources via `docker compose down -v`.
+   - Accessible via root `npm run test:e2e` and frontend `npm run test:e2e`.
+
+
 
