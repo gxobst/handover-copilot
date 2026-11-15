@@ -832,5 +832,39 @@ To verify full-stack user journeys through an actual browser running against the
    - `scripts/run-e2e-tests.ps1` (PowerShell) and `scripts/run-e2e-tests.sh` (Bash) automate detecting or starting the container stack, waiting for healthy status via `/api/healthz`, running the Playwright test suite, and cleaning up container resources via `docker compose down -v`.
    - Accessible via root `npm run test:e2e` and frontend `npm run test:e2e`.
 
+---
+
+## 16. Cloud Run Deployment, Database Persistence & CI/CD Architecture (Issue #25)
+
+### Decision Context
+Phase 4 deployment transitions the Shift Handover Copilot from local Docker Compose containers to Google Cloud Platform, provisioning immutable serverless compute (`europe-west2`), managed database persistence across scale-to-zero, Secret Manager configuration, live Vertex AI Gemini integration, and automated GitHub Actions CI/CD workflows.
+
+### Architecture & Resolution
+1. **Cloud Run Serverless Compute (`europe-west2`)**:
+   - `handover-dev`: Development service automatically deployed on every push to `main`.
+     - URL: `https://handover-dev-budwggf4rq-nw.a.run.app`
+   - `handover-prod`: Production service deployed via promotion of verified dev image artifact with required manual approval gate.
+     - URL: `https://handover-prod-budwggf4rq-nw.a.run.app`
+   - `handover-relay`: Lightweight webhook-to-dispatch relay service.
+     - URL: `https://handover-relay-budwggf4rq-nw.a.run.app`
+   - Runtime configuration: `--min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120`, runtime service account `handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com`.
+2. **Database Persistence Across Scale-to-Zero**:
+   - Managed PostgreSQL database `handover-db` provisioned in `europe-west2` with database `handover`.
+   - Connected via Cloud Run native Cloud SQL Unix socket `/cloudsql/boxwood-scope-292916:europe-west2:handover-db` with connection string stored securely in Secret Manager (`DATABASE_URL`).
+   - `handover-migrate` Cloud Run Job applies Alembic migrations (`uv run alembic upgrade head`) with `--wait` prior to shifting traffic to any new container revision.
+3. **Artifact Registry & Tag Management**:
+   - Repository `handover` in `europe-west2` with tag immutability and cleanup policy keeping the last 5 tags and purging untagged images older than 7 days.
+4. **Secret Manager Security**:
+   - Centralized secrets (`ADMIN_TOKEN`, `RELAY_WEBHOOK_TOKEN`, `DATABASE_URL`, `GITHUB_DISPATCH_PAT`) mounted into Cloud Run container environments via `secretAccessor` IAM binding on `handover-runtime`.
+5. **Live Vertex AI Gemini Integration**:
+   - Operational in production using `LLM_BACKEND=vertex`, `GCP_PROJECT=boxwood-scope-292916`, `GCP_LOCATION=global`, `ACTIVE_MODEL=google/gemini-3.5-flash-lite`, `FALLBACK_MODEL=google/gemini-3.1-flash-lite`.
+   - Verified live report synthesis in ~1.3–2.1s with structured output schema validation.
+6. **Automated CI/CD Workflows (`.github/workflows/`)**:
+   - `ci.yml`: Pull request quality gate running unit, integration, and Playwright tests.
+   - `deploy-dev.yml`: Push to `main` pipeline authenticating via Workload Identity Federation (WIF), building, tagging, migrating, deploying dev, and verifying `/api/healthz`.
+   - `promote-prod.yml`: Production promotion with required GitHub Environment review, reusing the identical tested dev container image artifact.
+   - `rollback.yml`: Manual instant traffic shift between Cloud Run revisions (`--to-revisions=<prev>=100`).
+
+
 
 
