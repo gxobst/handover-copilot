@@ -145,8 +145,8 @@ jobs:
             scripts/screenshots/
           if-no-files-found: ignore
 
-  deploy-gcp:
-    name: Deploy to Google Cloud Run
+  build-image:
+    name: Build and Push Container Image
     runs-on: ubuntu-latest
     needs: [integration-and-e2e]
     permissions:
@@ -156,11 +156,11 @@ jobs:
       PROJECT_ID: boxwood-scope-292916
       REGION: europe-west2
       ARTIFACT_REPO: handover
-      SERVICE_NAME: handover-dev
       WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
       WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
-      RUNTIME_SERVICE_ACCOUNT: handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com
-      CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
+    outputs:
+      image_tag: ${{ steps.image-tag.outputs.tag }}
+      image_uri: ${{ steps.image-tag.outputs.image_uri }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -202,13 +202,60 @@ jobs:
           docker push "${IMAGE_BASE}:${TAG}"
           docker push "${IMAGE_BASE}:latest"
 
+  deploy-gcp:
+    name: Deploy to Google Cloud Run
+    runs-on: ubuntu-latest
+    needs: [build-image]
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PROJECT_ID: boxwood-scope-292916
+      REGION: europe-west2
+      ARTIFACT_REPO: handover
+      SERVICE_NAME: handover-dev
+      WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
+      RUNTIME_SERVICE_ACCOUNT: handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com
+      CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: Run Cloud Run migration job
         run: |
           gcloud run jobs execute handover-migrate-dev --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --wait
 
       - name: Deploy to Cloud Run
         run: |
-          gcloud run deploy "${{ env.SERVICE_NAME }}" --image="${{ steps.image-tag.outputs.image_uri }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --platform=managed --allow-unauthenticated --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" --network="default" --subnet="default" --vpc-egress="private-ranges-only" --port=8000 --min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120 --clear-cloudsql-instances --set-secrets="ADMIN_TOKEN=ADMIN_TOKEN_DEV:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_DEV:latest,DATABASE_URL=DATABASE_URL_DEV:latest" --set-env-vars="APP_ENV=dev,PORT=8000,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image="${{ needs.build-image.outputs.image_uri }}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account="${{ env.RUNTIME_SERVICE_ACCOUNT }}" \
+            --network="default" \
+            --subnet="default" \
+            --vpc-egress="private-ranges-only" \
+            --port=8000 \
+            --min-instances=0 \
+            --max-instances=2 \
+            --cpu=1 \
+            --memory=512Mi \
+            --timeout=120 \
+            --clear-cloudsql-instances \
+            --set-secrets="ADMIN_TOKEN=ADMIN_TOKEN_DEV:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_DEV:latest,DATABASE_URL=DATABASE_URL_DEV:latest" \
+            --set-env-vars="APP_ENV=dev,CORS_ORIGINS=*,LLM_BACKEND=vertex,GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
 
       - name: Post-Deployment Health Validation
         id: validate-deploy
@@ -250,7 +297,8 @@ jobs:
           - **Environment:** \`${{ github.event.inputs.target_env || 'dev' }}\`
           - **Region:** \`${{ env.REGION }}\`
           - **Project:** \`${{ env.PROJECT_ID }}\`
-          - **Image:** \`${{ steps.image-tag.outputs.image_uri }}\`
+          - **Image:** \`${{ needs.build-image.outputs.image_uri }}\`
+          - **Image Tag:** \`${{ needs.build-image.outputs.image_tag }}\`
           - **Revision:** \`${REVISION}\`
           - **Service URL:** [${SERVICE_URL}](${SERVICE_URL})
           - **Health Endpoint:** [${SERVICE_URL}/api/healthz](${SERVICE_URL}/api/healthz)

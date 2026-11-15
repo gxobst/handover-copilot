@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verification script for GCP CI/CD Pipeline workflow (Issue #27)."""
+"""Verification script for GCP CI/CD Pipeline workflow (Issue #27, #32)."""
 
 from pathlib import Path
 import re
@@ -7,6 +7,7 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_FILE = REPO_ROOT / ".github" / "workflows" / "gcp-pipeline.yml"
+DEPLOY_DEV_FILE = REPO_ROOT / ".github" / "workflows" / "deploy-dev.yml"
 
 FORBIDDEN_PROVIDER = "a" + "w" + "s"
 
@@ -63,6 +64,35 @@ def try_parse_yaml(raw_text: str):
     return data
 
 
+def verify_deploy_dev_if_present():
+    """Verify deploy-dev.yml if retained for manual dev redeployment."""
+    if not DEPLOY_DEV_FILE.exists():
+        print(f"INFO: {DEPLOY_DEV_FILE} does not exist (deleted as superseded).")
+        return
+
+    print(f"Inspecting manual deploy-dev workflow: {DEPLOY_DEV_FILE}")
+    raw_dev = DEPLOY_DEV_FILE.read_text(encoding="utf-8")
+
+    # Forbidden cloud provider check
+    if FORBIDDEN_PROVIDER.lower() in raw_dev.lower():
+        print(f"FAIL: Forbidden provider reference found in {DEPLOY_DEV_FILE}")
+        sys.exit(1)
+
+    # Automated push trigger must NOT be present
+    assert "push:" not in raw_dev, "deploy-dev.yml must NOT have automated push triggers!"
+    assert "workflow_dispatch:" in raw_dev, "deploy-dev.yml must have workflow_dispatch trigger"
+
+    # Separate build and deploy stages
+    assert re.search(r"^\s\sbuild:\s*$", raw_dev, re.MULTILINE), "deploy-dev.yml missing 'build' job"
+    assert re.search(r"^\s\sdeploy:\s*$", raw_dev, re.MULTILINE), "deploy-dev.yml missing 'deploy' job"
+
+    deploy_match = re.search(r"deploy:(.*)", raw_dev, re.DOTALL)
+    assert deploy_match, "deploy job block missing in deploy-dev.yml"
+    assert "needs: [build]" in deploy_match.group(1) or "needs:\n      - build" in deploy_match.group(1) or "needs: build" in deploy_match.group(1), "deploy-dev deploy job must depend on build job"
+
+    print("PASS: deploy-dev.yml trigger and two-stage build/deploy architecture verified.")
+
+
 def verify_pipeline():
     print(f"Inspecting pipeline file: {PIPELINE_FILE}")
     if not PIPELINE_FILE.exists():
@@ -105,20 +135,20 @@ def verify_pipeline():
     print("PASS: Permissions and concurrency verified.")
 
     # 5. Required jobs present
-    required_jobs = ["backend-test", "frontend-test", "integration-and-e2e", "deploy-gcp"]
+    required_jobs = ["backend-test", "frontend-test", "integration-and-e2e", "build-image", "deploy-gcp"]
     for job in required_jobs:
         assert re.search(rf"^\s\s{re.escape(job)}:\s*$", raw_text, re.MULTILINE), f"Job {job} missing"
     print(f"PASS: All required jobs present: {required_jobs}")
 
     # 6. Parallel execution of backend-test and frontend-test
-    backend_block = re.search(r"backend-test:(.*?)(frontend-test:|integration-and-e2e:|deploy-gcp:)", raw_text, re.DOTALL)
-    frontend_block = re.search(r"frontend-test:(.*?)(backend-test:|integration-and-e2e:|deploy-gcp:)", raw_text, re.DOTALL)
+    backend_block = re.search(r"backend-test:(.*?)(frontend-test:|integration-and-e2e:|build-image:|deploy-gcp:)", raw_text, re.DOTALL)
+    frontend_block = re.search(r"frontend-test:(.*?)(backend-test:|integration-and-e2e:|build-image:|deploy-gcp:)", raw_text, re.DOTALL)
     assert backend_block and "needs:" not in backend_block.group(1), "backend-test should have no dependencies"
     assert frontend_block and "needs:" not in frontend_block.group(1), "frontend-test should have no dependencies"
     print("PASS: 'backend-test' and 'frontend-test' run concurrently in parallel.")
 
     # 7. integration-and-e2e needs both backend-test and frontend-test
-    integ_block = re.search(r"integration-and-e2e:(.*?)(deploy-gcp:|$)", raw_text, re.DOTALL)
+    integ_block = re.search(r"integration-and-e2e:(.*?)(build-image:|deploy-gcp:|$)", raw_text, re.DOTALL)
     assert integ_block, "Missing integration-and-e2e job block"
     integ_text = integ_block.group(1)
     needs_match = re.search(r"needs:\s*\[(.*?)\]", integ_text)
@@ -135,33 +165,59 @@ def verify_pipeline():
     assert re.search(r"docker compose down -v.*?if:\s*always\(\)", integ_text, re.DOTALL) or re.search(r"if:\s*always\(\).*?docker compose down -v", integ_text, re.DOTALL), "Missing docker compose down -v under if: always()"
     print("PASS: 'integration-and-e2e' steps and cleanup verified.")
 
-    # 9. deploy-gcp needs integration-and-e2e
+    # 9. build-image job block and dependency
+    build_block = re.search(r"build-image:(.*?)(deploy-gcp:|$)", raw_text, re.DOTALL)
+    assert build_block, "Missing build-image job block"
+    build_text = build_block.group(1)
+    build_needs_match = re.search(r"needs:\s*\[(.*?)\]", build_text)
+    assert build_needs_match and "integration-and-e2e" in build_needs_match.group(1), "build-image must depend on [integration-and-e2e]"
+    assert "id-token: write" in build_text, "Missing id-token: write in build-image"
+    print("PASS: 'build-image' depends on [integration-and-e2e].")
+
+    # 10. Tag pattern YYYYMMDD-HHMMSS-shortsha and build outputs
+    assert re.search(r"date\s+\+%Y%m%d-%H%M%S", build_text), "Missing timestamp pattern '%Y%m%d-%H%M%S'"
+    assert re.search(r"git\s+rev-parse\s+--short\s+HEAD", build_text), "Missing short sha calculation"
+    assert re.search(r'TAG="\${TIMESTAMP}-\${SHORT_SHA}"', build_text) or re.search(r"TAG=.*TIMESTAMP.*SHORT_SHA", build_text), "Missing TAG formatted as ${TIMESTAMP}-${SHORT_SHA}"
+    assert "outputs:" in build_text, "Missing outputs declaration in build-image"
+    assert re.search(r"image_tag:\s*\${{\s*steps\.image-tag\.outputs\.tag\s*}}", build_text), "Missing image_tag output mapping in build-image"
+    assert re.search(r"image_uri:\s*\${{\s*steps\.image-tag\.outputs\.image_uri\s*}}", build_text), "Missing image_uri output mapping in build-image"
+    assert "gcloud auth configure-docker" in build_text, "Missing configure-docker step in build-image"
+    assert "docker build" in build_text, "Missing docker build step in build-image"
+    assert "docker push" in build_text, "Missing docker push step in build-image"
+    print("PASS: Tag pattern 'YYYYMMDD-HHMMSS-shortsha' and build-image outputs/push verified.")
+
+    # 11. deploy-gcp needs build-image and consumes outputs
     deploy_block = re.search(r"deploy-gcp:(.*)", raw_text, re.DOTALL)
     assert deploy_block, "Missing deploy-gcp job block"
     deploy_text = deploy_block.group(1)
     deploy_needs_match = re.search(r"needs:\s*\[(.*?)\]", deploy_text)
-    assert deploy_needs_match and "integration-and-e2e" in deploy_needs_match.group(1), "deploy-gcp must depend on integration-and-e2e"
-    print("PASS: 'deploy-gcp' depends on [integration-and-e2e].")
+    assert deploy_needs_match and "build-image" in deploy_needs_match.group(1), "deploy-gcp must depend on [build-image]"
+    assert re.search(r"needs\.build-image\.outputs\.image_uri", deploy_text), "deploy-gcp must consume needs.build-image.outputs.image_uri"
+    assert "PORT=8000" not in re.search(r"--set-env-vars=[^\n]+", deploy_text).group(0), "PORT=8000 should not be in --set-env-vars"
+    print("PASS: 'deploy-gcp' depends on [build-image] and consumes build image output.")
 
-    # 10. OIDC authentication via WIF
+    # 12. OIDC authentication via WIF
     assert "google-github-actions/auth@v2" in deploy_text, "Missing google-github-actions/auth@v2"
     assert "workload_identity_provider:" in deploy_text, "Missing workload_identity_provider"
     assert "service_account:" in deploy_text, "Missing service_account"
     assert "id-token: write" in deploy_text, "Missing id-token: write in deploy-gcp"
     print("PASS: Google Cloud WIF authentication step verified.")
 
-    # 11. Cloud Run deployment and migration job
+    # 13. Cloud Run deployment and migration job
     assert "gcloud run jobs execute handover-migrate" in deploy_text, "Missing migration job execution"
     assert "gcloud run deploy" in deploy_text, "Missing gcloud run deploy"
     print("PASS: Cloud Run migration and deployment commands verified.")
 
-    # 12. Post-deployment health validation
+    # 14. Post-deployment health validation
     assert re.search(r"id:\s*validate-deploy", deploy_text), "Missing validate-deploy step"
     assert "gcloud run services describe" in deploy_text, "Missing service URL resolution"
     assert "${SERVICE_URL}/api/healthz" in deploy_text or "$SERVICE_URL/api/healthz" in deploy_text, "Missing service URL healthz polling"
-    assert "200" in deploy_text and '"ok"' in deploy_text or "'ok'" in deploy_text, "Missing 200 / ok verification"
+    assert "200" in deploy_text and ('"ok"' in deploy_text or "'ok'" in deploy_text), "Missing 200 / ok verification"
     assert "GITHUB_STEP_SUMMARY" in deploy_text, "Missing GITHUB_STEP_SUMMARY publication"
     print("PASS: Post-deployment health validation step verified.")
+
+    # 15. Verify deploy-dev.yml if present
+    verify_deploy_dev_if_present()
 
     print("\nAll pipeline verification checks PASSED successfully.")
 

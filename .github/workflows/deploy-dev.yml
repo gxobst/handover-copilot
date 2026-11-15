@@ -1,9 +1,6 @@
 name: Deploy Dev
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -21,9 +18,15 @@ env:
   CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
 
 jobs:
-  deploy-dev:
-    name: Build, Migrate, and Deploy to Dev
+  build:
+    name: Build and Push Container Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_tag: ${{ steps.image-tag.outputs.tag }}
+      image_uri: ${{ steps.image-tag.outputs.image_uri }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,8 +50,11 @@ jobs:
           SHORT_SHA="$(git rev-parse --short HEAD)"
           TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
           TAG="${TIMESTAMP}-${SHORT_SHA}"
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/app:${TAG}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
           echo "IMAGE_TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
 
       - name: Build and push container image
         env:
@@ -62,9 +68,29 @@ jobs:
           docker push "${IMAGE_BASE}:${TAG}"
           docker push "${IMAGE_BASE}:latest"
 
+  deploy:
+    name: Deploy to Cloud Run Dev
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: Update and run database migration job
         env:
-          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
           GCP_PROJECT: ${{ env.PROJECT_ID }}
           GCP_REGION: ${{ env.REGION }}
           RUNTIME_EMAIL: ${{ env.RUNTIME_SERVICE_ACCOUNT }}
@@ -78,9 +104,9 @@ jobs:
 
       - name: Deploy to Cloud Run Dev
         env:
-          TAG: ${{ steps.image-tag.outputs.tag }}
+          TAG: ${{ needs.build.outputs.image_tag }}
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
         run: |
-          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/app:${TAG}"
           gcloud run deploy "${{ env.SERVICE_NAME }}" \
             --image="${IMAGE_URI}" \
             --region="${{ env.REGION }}" \
@@ -135,7 +161,8 @@ jobs:
           - **Service:** \`${{ env.SERVICE_NAME }}\`
           - **Environment:** \`dev\`
           - **Region:** \`${{ env.REGION }}\`
-          - **Image Tag:** \`${{ steps.image-tag.outputs.tag }}\`
+          - **Image Tag:** \`${{ needs.build.outputs.image_tag }}\`
+          - **Image URI:** \`${{ needs.build.outputs.image_uri }}\`
           - **Cloud Run Revision:** \`${REVISION}\`
           - **URL:** [${SERVICE_URL}](${SERVICE_URL})
           - **Health Endpoint:** [${SERVICE_URL}/api/healthz](${SERVICE_URL}/api/healthz)
