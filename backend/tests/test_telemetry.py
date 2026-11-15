@@ -37,6 +37,7 @@ from app.telemetry import (
     record_event_created,
     record_fallback_used,
     record_generation_duration,
+    record_http_request,
     record_report_generated,
     reset_telemetry_for_tests,
     sanitize_data,
@@ -304,30 +305,165 @@ def test_privacy_filter_trace_span_attributes():
 # -----------------------------------------------------------------------------
 
 def test_metric_instruments_recording():
-    """Verify all 4 metric instruments record data points with expected labels."""
+    """Verify all 5 metric instruments record data points with expected labels including environment and version."""
     reset_telemetry_for_tests()
     reader = get_in_memory_metric_reader()
     assert reader is not None
 
     record_event_created(env="dev", version="0.1.0")
-    record_report_generated(outcome="success", model="gemini-3.5-flash-lite")
-    record_generation_duration(duration_seconds=1.45, outcome="success")
-    record_fallback_used(reason="quota_exhausted")
+    record_report_generated(outcome="success", model="gemini-3.5-flash-lite", env="dev", version="0.1.0")
+    record_generation_duration(duration_seconds=1.45, outcome="success", env="dev", version="0.1.0")
+    record_fallback_used(reason="quota_exhausted", env="dev", version="0.1.0")
+    record_http_request(method="GET", route="/api/healthz", status_code=200, env="dev", version="0.1.0")
 
     metrics_data = reader.get_metrics_data()
     assert metrics_data is not None
 
-    metric_names = {
-        m.name
+    metric_map = {
+        m.name: m
         for rm in metrics_data.resource_metrics
         for sm in rm.scope_metrics
         for m in sm.metrics
     }
 
-    assert "handover_events_created_total" in metric_names
-    assert "handover_reports_generated_total" in metric_names
-    assert "handover_generation_duration_seconds" in metric_names
-    assert "handover_fallback_used_total" in metric_names
+    assert "handover_events_created_total" in metric_map
+    assert "handover_reports_generated_total" in metric_map
+    assert "handover_generation_duration_seconds" in metric_map
+    assert "handover_fallback_used_total" in metric_map
+    assert "handover_http_requests_total" in metric_map
+
+    # Verify each instrument data point carries environment and version dimensions
+    for name in [
+        "handover_events_created_total",
+        "handover_reports_generated_total",
+        "handover_generation_duration_seconds",
+        "handover_fallback_used_total",
+        "handover_http_requests_total",
+    ]:
+        metric = metric_map[name]
+        data_points = getattr(metric.data, "data_points", [])
+        assert len(data_points) >= 1, f"Metric {name} must have at least one data point"
+        point = data_points[0]
+        attrs = point.attributes
+        assert "environment" in attrs or "env" in attrs, f"Metric {name} missing environment dimension"
+        assert "version" in attrs, f"Metric {name} missing version dimension"
+        assert attrs.get("environment") == "dev" or attrs.get("env") == "dev"
+        assert attrs.get("version") == "0.1.0"
+
+
+def test_cardinality_guard_permits_environment_and_version():
+    """AC: validate_metric_attributes permits environment, env, and version, but strictly rejects forbidden keys."""
+    allowed = {
+        "environment": "production",
+        "env": "prod",
+        "version": "1.0.0",
+        "outcome": "success",
+        "model": "gemini-3.5-flash-lite",
+        "method": "POST",
+        "route": "/api/reports/generate",
+        "status_code": "201",
+    }
+    result = validate_metric_attributes(allowed, raise_on_violation=True)
+    assert result == allowed
+
+    # Rejection of forbidden labels
+    for forbidden in ["shift_key", "report_id", "machine", "note", "notes", "user_text", "summary", "token", "admin_token"]:
+        with pytest.raises(ValueError, match="Cardinality guard violation"):
+            validate_metric_attributes({forbidden: "leak", "environment": "dev"}, raise_on_violation=True)
+
+
+def test_custom_settings_propagation_to_metrics():
+    """Verify custom environment and version configured in Settings propagate to metric dimensions."""
+    custom_cfg = Settings(
+        service_name="handover-custom",
+        environment="staging",
+        version="2.4.6",
+    )
+    reset_telemetry_for_tests(settings=custom_cfg)
+    try:
+        reader = get_in_memory_metric_reader()
+        assert reader is not None
+
+        # Call helpers without explicit env / version
+        record_event_created()
+        record_report_generated(outcome="success", model="gemini-3.5-flash-lite")
+        record_generation_duration(duration_seconds=0.75, outcome="success")
+        record_fallback_used(reason="timeout")
+        record_http_request(method="GET", route="/api/healthz", status_code=200)
+
+        metrics_data = reader.get_metrics_data()
+        assert metrics_data is not None
+
+        metric_map = {
+            m.name: m
+            for rm in metrics_data.resource_metrics
+            for sm in rm.scope_metrics
+            for m in sm.metrics
+        }
+
+        for name in [
+            "handover_events_created_total",
+            "handover_reports_generated_total",
+            "handover_generation_duration_seconds",
+            "handover_fallback_used_total",
+            "handover_http_requests_total",
+        ]:
+            data_points = getattr(metric_map[name].data, "data_points", [])
+            assert len(data_points) >= 1
+            attrs = data_points[0].attributes
+            assert attrs.get("environment") == "staging"
+            assert attrs.get("version") == "2.4.6"
+    finally:
+        reset_telemetry_for_tests()
+
+
+def test_telemetry_middleware_records_http_requests_total(client: TestClient):
+    """Verify TelemetryMiddleware increments handover_http_requests_total with method, route, status_code, environment, version."""
+    reset_telemetry_for_tests()
+    reader = get_in_memory_metric_reader()
+    assert reader is not None
+
+    default_cfg = get_settings()
+
+    # 1. Successful request
+    res1 = client.get("/api/healthz")
+    assert res1.status_code == 200
+
+    # 2. 404 request with UUID path
+    res2 = client.get(f"/api/reports/{uuid4()}")
+    assert res2.status_code == 404
+
+    metrics_data = reader.get_metrics_data()
+    assert metrics_data is not None
+
+    http_metrics = [
+        m for rm in metrics_data.resource_metrics
+        for sm in rm.scope_metrics
+        for m in sm.metrics
+        if m.name == "handover_http_requests_total"
+    ]
+    assert len(http_metrics) == 1
+    points = http_metrics[0].data.data_points
+    assert len(points) >= 2
+
+    points_by_status = {p.attributes.get("status_code"): p for p in points}
+
+    # Verify 200 point
+    assert "200" in points_by_status
+    p200 = points_by_status["200"]
+    assert p200.attributes.get("method") == "GET"
+    assert p200.attributes.get("route") == "/api/healthz"
+    assert p200.attributes.get("environment") == default_cfg.environment
+    assert p200.attributes.get("version") == default_cfg.version
+
+    # Verify 404 point
+    assert "404" in points_by_status
+    p404 = points_by_status["404"]
+    assert p404.attributes.get("method") == "GET"
+    # Route template or sanitized route
+    assert p404.attributes.get("route") in ("/api/reports/{id}", "/api/reports/{report_id}")
+    assert p404.attributes.get("environment") == default_cfg.environment
+    assert p404.attributes.get("version") == default_cfg.version
 
 
 def test_cardinality_guard_rejects_forbidden_labels():

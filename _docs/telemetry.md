@@ -15,14 +15,15 @@ Every telemetry signal (traces, metrics, logs) is tagged with standard W3C / Ope
 
 ## 2. Metric Instruments & Cardinality Rules
 
-OpenTelemetry meters publish bounded, low-cardinality Prometheus-compatible metrics to avoid exceeding Grafana Cloud Free tier series limits (capped at 10,000 active series).
+OpenTelemetry meters publish bounded, low-cardinality Prometheus-compatible metrics to avoid exceeding Grafana Cloud Free tier series limits (capped at 10,000 active series). All metric recording helpers automatically populate `environment` and `version` dimensions from active application settings (`Settings.environment`, `Settings.version`) unless explicitly overridden by caller arguments.
 
 | Metric Name | Type | Description | Allowed Dimensions / Labels |
 |---|---|---|---|
 | `handover_events_created_total` | Counter | Total number of shift events created | `env`, `environment`, `version` |
-| `handover_reports_generated_total` | Counter | Total number of handover reports generated | `outcome` (`"success"` \| `"error"`), `model` |
-| `handover_generation_duration_seconds` | Histogram | Handover report generation latency in seconds | `outcome` (`"success"` \| `"error"`) |
-| `handover_fallback_used_total` | Counter | Total times the LLM fallback model was invoked | `reason` |
+| `handover_reports_generated_total` | Counter | Total number of handover reports generated | `outcome` (`"success"` \| `"error"`), `model`, `environment`, `version` |
+| `handover_generation_duration_seconds` | Histogram | Handover report generation latency in seconds | `outcome` (`"success"` \| `"error"`), `environment`, `version` |
+| `handover_fallback_used_total` | Counter | Total times the LLM fallback model was invoked | `reason`, `environment`, `version` |
+| `handover_http_requests_total` | Counter | Total incoming HTTP requests | `method`, `route`, `status_code`, `environment`, `version` |
 
 ### Strict Cardinality Enforcement Guard
 To protect series limits and maintain zero-PII guarantees, metric instruments **must never** accept high-cardinality or user-provided labels:

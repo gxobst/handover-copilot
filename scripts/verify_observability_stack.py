@@ -16,6 +16,7 @@ Validates:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -32,6 +33,9 @@ PROMETHEUS_FILE = OBSERVABILITY_DIR / "prometheus.yml"
 LOKI_CONFIG_FILE = OBSERVABILITY_DIR / "loki-config.yaml"
 TEMPO_CONFIG_FILE = OBSERVABILITY_DIR / "tempo-config.yaml"
 DATASOURCES_FILE = OBSERVABILITY_DIR / "datasources.yaml"
+DASHBOARDS_PROVISIONING_FILE = OBSERVABILITY_DIR / "dashboards.yaml"
+DASHBOARDS_DIR = OBSERVABILITY_DIR / "dashboards"
+APPLICATION_METRICS_DASHBOARD_FILE = DASHBOARDS_DIR / "application-metrics.json"
 
 
 def try_parse_yaml(raw_text: str) -> dict:
@@ -79,6 +83,8 @@ def verify_static_configuration() -> list[str]:
         ("loki-config.yaml", LOKI_CONFIG_FILE),
         ("tempo-config.yaml", TEMPO_CONFIG_FILE),
         ("datasources.yaml", DATASOURCES_FILE),
+        ("dashboards.yaml", DASHBOARDS_PROVISIONING_FILE),
+        ("dashboards/application-metrics.json", APPLICATION_METRICS_DASHBOARD_FILE),
     ]
 
     for name, path in expected_files:
@@ -144,6 +150,20 @@ def verify_static_configuration() -> list[str]:
     if "GF_AUTH_ANONYMOUS_ORG_ROLE" not in compose_text or "Admin" not in compose_text:
         errors.append("Grafana service must set GF_AUTH_ANONYMOUS_ORG_ROLE=Admin")
 
+    # Dashboard volume mounts in Grafana service (Issue #36)
+    if "dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro" not in compose_text:
+        errors.append(
+            "docker-compose.yml must mount ./dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro"
+        )
+    if not (
+        "./dashboards:/etc/grafana/dashboards:ro" in compose_text
+        or "./dashboards:/etc/grafana/provisioning/dashboards/json:ro" in compose_text
+        or "./dashboards:/var/lib/grafana/dashboards:ro" in compose_text
+    ):
+        errors.append(
+            "docker-compose.yml must mount ./dashboards directory into Grafana service"
+        )
+
     # 3. OpenTelemetry Collector Configuration
     # Receivers: OTLP gRPC 4317, HTTP 4318
     if not re.search(r"endpoint:\s*0\.0\.0\.0:4317", otel_text):
@@ -208,6 +228,93 @@ def verify_static_configuration() -> list[str]:
         errors.append(
             "datasources.yaml missing Tempo tracesToLogs navigation linking traces to Loki"
         )
+
+    # 8. Grafana Dashboards Provisioning Configuration (Issue #36)
+    dashboards_yaml_text = DASHBOARDS_PROVISIONING_FILE.read_text(encoding="utf-8")
+    if "providers" not in dashboards_yaml_text:
+        errors.append("dashboards.yaml missing providers configuration block")
+    if not re.search(
+        r"path:\s*(/etc/grafana/provisioning/dashboards|/etc/grafana/dashboards|/var/lib/grafana/dashboards)",
+        dashboards_yaml_text,
+    ):
+        errors.append(
+            "dashboards.yaml must point provider path to /etc/grafana/provisioning/dashboards or /etc/grafana/dashboards"
+        )
+
+    # 9. Application Metrics Dashboard JSON Verification (Issue #36)
+    try:
+        dashboard_content = APPLICATION_METRICS_DASHBOARD_FILE.read_text(encoding="utf-8")
+        dashboard_json = json.loads(dashboard_content)
+    except Exception as exc:
+        errors.append(f"application-metrics.json is not valid JSON: {exc}")
+        return errors
+
+    if dashboard_json.get("title") != "Shift Handover - Application Metrics":
+        errors.append(
+            f"application-metrics.json title must be 'Shift Handover - Application Metrics', found: '{dashboard_json.get('title')}'"
+        )
+    if dashboard_json.get("uid") != "handover-app-metrics":
+        errors.append(
+            f"application-metrics.json uid must be 'handover-app-metrics', found: '{dashboard_json.get('uid')}'"
+        )
+
+    # Validate template variables
+    variables = {v.get("name"): v for v in dashboard_json.get("templating", {}).get("list", [])}
+    if "environment" not in variables:
+        errors.append("application-metrics.json missing template variable '$environment'")
+    else:
+        env_var = variables["environment"]
+        if not env_var.get("includeAll"):
+            errors.append("Variable '$environment' must enable includeAll")
+        if not env_var.get("multi"):
+            errors.append("Variable '$environment' must enable multi-selection")
+        env_options = [opt.get("value") for opt in env_var.get("options", [])]
+        for opt in ["dev", "prod", "local"]:
+            if opt not in env_options and opt not in str(env_var.get("query", "")):
+                errors.append(f"Variable '$environment' missing option '{opt}'")
+
+    if "version" not in variables:
+        errors.append("application-metrics.json missing template variable '$version'")
+    else:
+        ver_var = variables["version"]
+        if not ver_var.get("includeAll"):
+            errors.append("Variable '$version' must enable includeAll")
+        if not ver_var.get("multi"):
+            errors.append("Variable '$version' must enable multi-selection")
+
+    # Validate panels and PromQL filter dimensions
+    panels = dashboard_json.get("panels", [])
+    if len(panels) < 5:
+        errors.append(
+            f"application-metrics.json must contain at least 5 panels, found: {len(panels)}"
+        )
+
+    required_metrics = [
+        "handover_reports_generated_total",
+        "handover_events_created_total",
+        "handover_generation_duration_seconds",
+        "handover_fallback_used_total",
+        "handover_http_requests_total",
+    ]
+
+    for req_m in required_metrics:
+        if req_m not in dashboard_content:
+            errors.append(f"application-metrics.json panels missing metric '{req_m}'")
+
+    # Verify every panel target has environment=~"$environment" and version=~"$version"
+    for panel in panels:
+        title = panel.get("title", f"Panel {panel.get('id')}")
+        targets = panel.get("targets", [])
+        for target in targets:
+            expr = target.get("expr", "")
+            if 'environment=~"$environment"' not in expr and "environment=~\"$environment\"" not in expr:
+                errors.append(
+                    f"Panel '{title}' PromQL query missing filter 'environment=~\"$environment\"': {expr}"
+                )
+            if 'version=~"$version"' not in expr and "version=~\"$version\"" not in expr:
+                errors.append(
+                    f"Panel '{title}' PromQL query missing filter 'version=~\"$version\"': {expr}"
+                )
 
     return errors
 
@@ -278,7 +385,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print("======================================================================")
-    print("   OpenTelemetry & Observability Stack Verification (Issue #35)")
+    print("   OpenTelemetry & Observability Stack Verification (Issue #35, #36)")
     print("======================================================================\n")
 
     print("[1/2] Verifying static configuration files...")
@@ -298,6 +405,8 @@ def main() -> int:
     print("  ✅ Tempo trace storage and OTLP gRPC ingestion configured on port 3200/4317.")
     print("  ✅ Grafana datasources provisioned with trace-to-logs and logs-to-traces links.")
     print("  ✅ Grafana anonymous admin access configured.")
+    print("  ✅ Grafana dashboard provider provisioned in dashboards.yaml.")
+    print("  ✅ Application metrics dashboard (handover-app-metrics) validated with $environment and $version filters.")
 
     if args.live or args.wait > 0:
         print(f"\n[2/2] Checking live health endpoints (timeout: {args.wait}s)...")

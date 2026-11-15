@@ -251,6 +251,7 @@ _events_created_counter: Optional[Counter] = None
 _reports_generated_counter: Optional[Counter] = None
 _generation_duration_histogram: Optional[Histogram] = None
 _fallback_used_counter: Optional[Counter] = None
+_http_requests_counter: Optional[Counter] = None
 _resource: Optional[Resource] = None
 _active_settings: Optional[Settings] = None
 _initialized: bool = False
@@ -264,6 +265,7 @@ def init_telemetry(
     global _in_memory_span_exporter, _in_memory_metric_reader
     global _events_created_counter, _reports_generated_counter
     global _generation_duration_histogram, _fallback_used_counter
+    global _http_requests_counter
     global _resource, _active_settings
     global _initialized
 
@@ -360,6 +362,11 @@ def init_telemetry(
     _fallback_used_counter = meter.create_counter(
         name="handover_fallback_used_total",
         description="Total number of times LLM fallback model was used",
+        unit="1",
+    )
+    _http_requests_counter = meter.create_counter(
+        name="handover_http_requests_total",
+        description="Total incoming HTTP requests",
         unit="1",
     )
 
@@ -506,7 +513,7 @@ def record_event_created(
     extra_labels: Optional[dict[str, Any]] = None,
 ) -> None:
     """Increment handover_events_created_total counter."""
-    settings = get_settings()
+    settings = get_active_settings()
     actual_env = env or settings.environment
     actual_version = version or settings.version
     labels = {
@@ -524,12 +531,19 @@ def record_event_created(
 def record_report_generated(
     outcome: str,
     model: str,
+    env: Optional[str] = None,
+    version: Optional[str] = None,
     extra_labels: Optional[dict[str, Any]] = None,
 ) -> None:
     """Increment handover_reports_generated_total counter (outcome: 'success' | 'error')."""
+    settings = get_active_settings()
+    actual_env = env or settings.environment
+    actual_version = version or settings.version
     labels = {
         "outcome": outcome,
         "model": model,
+        "environment": actual_env,
+        "version": actual_version,
     }
     if extra_labels:
         labels.update(extra_labels)
@@ -541,11 +555,18 @@ def record_report_generated(
 def record_generation_duration(
     duration_seconds: float,
     outcome: str,
+    env: Optional[str] = None,
+    version: Optional[str] = None,
     extra_labels: Optional[dict[str, Any]] = None,
 ) -> None:
     """Record handover_generation_duration_seconds histogram."""
+    settings = get_active_settings()
+    actual_env = env or settings.environment
+    actual_version = version or settings.version
     labels = {
         "outcome": outcome,
+        "environment": actual_env,
+        "version": actual_version,
     }
     if extra_labels:
         labels.update(extra_labels)
@@ -556,17 +577,63 @@ def record_generation_duration(
 
 def record_fallback_used(
     reason: str,
+    env: Optional[str] = None,
+    version: Optional[str] = None,
     extra_labels: Optional[dict[str, Any]] = None,
 ) -> None:
     """Increment handover_fallback_used_total counter."""
+    settings = get_active_settings()
+    actual_env = env or settings.environment
+    actual_version = version or settings.version
     labels = {
         "reason": reason,
+        "environment": actual_env,
+        "version": actual_version,
     }
     if extra_labels:
         labels.update(extra_labels)
     safe_labels = validate_metric_attributes(labels, raise_on_violation=True)
     if _fallback_used_counter:
         _fallback_used_counter.add(1, safe_labels)
+
+
+def record_http_request(
+    method: str,
+    route: str,
+    status_code: int | str,
+    env: Optional[str] = None,
+    version: Optional[str] = None,
+    extra_labels: Optional[dict[str, Any]] = None,
+) -> None:
+    """Increment handover_http_requests_total counter."""
+    settings = get_active_settings()
+    actual_env = env or settings.environment
+    actual_version = version or settings.version
+    labels = {
+        "method": method,
+        "route": route,
+        "status_code": str(status_code),
+        "environment": actual_env,
+        "version": actual_version,
+    }
+    if extra_labels:
+        labels.update(extra_labels)
+    safe_labels = validate_metric_attributes(labels, raise_on_violation=True)
+    if _http_requests_counter:
+        _http_requests_counter.add(1, safe_labels)
+
+
+def _extract_request_route(request: Request) -> str:
+    """Extract path template or sanitized URL path for metric route dimension."""
+    scope_route = request.scope.get("route")
+    if scope_route and hasattr(scope_route, "path"):
+        return str(scope_route.path)
+    path = request.url.path
+    return re.sub(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        "{id}",
+        path,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -646,10 +713,26 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 span.set_attribute("http.status_code", response.status_code)
                 response.headers["X-Trace-ID"] = trace_id
+                route = _extract_request_route(request)
+                record_http_request(
+                    method=request.method,
+                    route=route,
+                    status_code=response.status_code,
+                    env=settings.environment,
+                    version=settings.version,
+                )
                 return response
         except Exception as exc:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
+            route = _extract_request_route(request)
+            record_http_request(
+                method=request.method,
+                route=route,
+                status_code=500,
+                env=settings.environment,
+                version=settings.version,
+            )
             raise
         finally:
             force_flush_telemetry()

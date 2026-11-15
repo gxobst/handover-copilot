@@ -82,6 +82,9 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - ./datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./dashboards:/etc/grafana/provisioning/dashboards/json:ro
+      - ./dashboards:/etc/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:
