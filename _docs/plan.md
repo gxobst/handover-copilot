@@ -1045,3 +1045,30 @@ A standalone Docker Compose project named `handover-observability` is provided i
   - Pre-provisioned datasources for Prometheus, Loki, and Tempo.
   - Bidirectional correlation: Tempo `tracesToLogs` navigates from trace spans to correlated Loki logs, and Loki `derivedFields` extracts `trace_id` to jump directly into Tempo traces.
 - **Verification Script:** `scripts/verify_observability_stack.py` provides automated schema, port, and live health verification across all 5 services.
+
+
+## 20. Application Metrics Enrichment and Filtered Grafana Dashboard Panels (Issue #36)
+
+### 1. Metric Enrichment with Environment and Version
+All application metrics in `backend/app/telemetry.py` are enriched with `environment` and `version` labels derived dynamically from active application settings (`Settings.environment`, `Settings.version`) while supporting explicit caller overrides:
+- `handover_events_created_total`: Labels `env`, `environment`, `version`.
+- `handover_reports_generated_total`: Labels `outcome` (`success` | `error`), `model`, `environment`, `version`.
+- `handover_generation_duration_seconds`: Histogram duration with labels `outcome`, `environment`, `version`.
+- `handover_fallback_used_total`: Counter with labels `reason`, `environment`, `version`.
+- `handover_http_requests_total`: Counter tracking all incoming HTTP requests via `TelemetryMiddleware` with labels `method`, `route`, `status_code`, `environment`, `version`.
+- **Cardinality Guard:** `validate_metric_attributes` explicitly whitelists `environment`, `env`, and `version` while strictly enforcing rejection of high-cardinality/PII keys (`shift_key`, `report_id`, `machine`, `note`, `notes`, `user_text`, `summary`, tokens).
+
+### 2. Provisioned Grafana Dashboard with Dynamic Multi-Filtering
+- **Provisioning Structure:** `observability/dashboards.yaml` defines the Grafana dashboard provider mounting `observability/dashboards/` into `/etc/grafana/provisioning/dashboards/json`.
+- **Dashboard Definition:** `observability/dashboards/application-metrics.json` (UID `handover-app-metrics`, title `"Shift Handover - Application Metrics"`).
+- **Template Variables:**
+  - `$environment`: Multi-select dropdown with options `dev`, `prod`, `local`, and `All` (regex `.*`).
+  - `$version`: Multi-select dropdown with options for deployed versions and `All` (regex `.*`).
+- **Filtered Panels:**
+  1. Handover Reports Generated (Rate / Total, grouped by outcome and model).
+  2. Shift Events Created (Rate / Total).
+  3. Report Generation Latency (p95 histogram quantile).
+  4. Fallback Model Invocations count (grouped by reason).
+  5. HTTP Request Throughput & Error Rate (grouped by HTTP status code).
+  - All PromQL panel queries strictly filter by `{environment=~"$environment", version=~"$version"}`.
+- **Automated Verification:** `scripts/verify_observability_stack.py` validates dashboard syntax, mounts, template variables, PromQL queries, and live endpoint responsiveness.
