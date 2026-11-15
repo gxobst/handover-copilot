@@ -1186,3 +1186,21 @@ To autonomously investigate and remediate operational incidents, an alert pollin
 - **Unit & Integration Suite**: `on-call-engineer/tests/test_poller.py` (18 tests covering zero alerts, firing alerts, multiple simultaneous alerts, cooldown windows, unreachable API, malformed payloads, single-run, and dry-run modes).
 - **End-to-End Verification**: `scripts/verify_on_call_poller.py` validates all 7 check suites with exit code 0.
 
+
+## 24. On-Call Incident Resolution, Production Promotion Verification, and Vivid Documentation Styling (Issue #40)
+
+To resolve the active incident, restore continuous integration and deployment pipelines to green status, establish production deployment verification, and elevate repository documentation presentation:
+
+### 1. On-Call Incident Resolution & Verification
+- **Root Cause & Surgical Correction**: A typo invoking `remove_prefix` instead of Python's standard `removeprefix` during report summary markdown cleanup in `backend/app/services/handover.py` caused both primary and fallback generation attempts to fail with `502 Bad Gateway`. The surgical correction changed line 86 to `content.summary = content.summary.removeprefix("# ").strip()`.
+- **Pipeline Recovery**: Pushing the fix to `origin/main` automatically re-ran `.github/workflows/gcp-pipeline.yml` in GitHub Actions. All jobs passed cleanly (`Frontend Component Tests`, `Backend Unit Tests`, `Compose Integration and Playwright E2E`, `Build and Push Container Image`, and `Deploy to Cloud Run`), turning the CI/CD Pipeline badge green (`passing`).
+
+### 2. Production Promotion Verification
+- **Immutable Artifact Promotion**: `.github/workflows/promote-prod.yml` was executed via `workflow_dispatch`. The promotion verified Dev service health, resolved the verified container image tag, executed database migrations on the production database, and promoted the identical container artifact to `handover-prod`, establishing a successful execution history and turning the `Promote to Production` badge green (`passing`).
+
+### 3. Vivid Documentation & UI Architecture
+- **Vivid Mermaid Diagrams**: Custom `classDef` definitions, distinct tier palettes (Clients, Cloud Run, Application Container, Databases/AI, Observability Host, On-Call Agent), high-contrast borders, and clear subgraphs are implemented in both `README.md` and `on-call-engineer/README.md`.
+- **Visual Production Walkthrough**: Real high-resolution UI captures are embedded under `## 📸 Visual Walkthrough & Production UI`, including Figure 2 showing the real AI-synthesized report (Executive Summary, Safety Notes, and Open Actions table with priority badges) distinct from Figure 1.
+- **On-Call Integrity**: Retained `agy` as the default on-call agent runner (`DEFAULT_AGENT_CMD = "agy"` in `on-call-engineer/config.py` and `dispatcher.py`).
+
+
