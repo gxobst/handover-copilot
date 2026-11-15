@@ -865,6 +865,46 @@ Phase 4 deployment transitions the Shift Handover Copilot from local Docker Comp
    - `promote-prod.yml`: Production promotion with required GitHub Environment review, reusing the identical tested dev container image artifact.
    - `rollback.yml`: Manual instant traffic shift between Cloud Run revisions (`--to-revisions=<prev>=100`).
 
+---
+
+## 17. Unified GCP CI/CD Pipeline Architecture (Issue #27)
+
+### Decision Context
+Issue #27 introduces a unified GitHub Actions CI/CD pipeline (`.github/workflows/gcp-pipeline.yml`) named `GCP CI/CD Pipeline`. It provides an end-to-end automated lifecycle: parallel backend and frontend unit test gates, a fully containerized Docker Compose integration and Playwright browser E2E test gate, followed by passwordless GCP OIDC (Workload Identity Federation) authentication, container image build and push to Google Artifact Registry, Cloud Run database migration execution, deployment to Google Cloud Run (`handover-dev`), and strict post-deployment health validation against `/api/healthz`.
+
+### Architecture & Pipeline Structure
+1. **Pipeline Triggers & Permissions (`.github/workflows/gcp-pipeline.yml`)**:
+   - Triggers on `push` to branch `main` and manual trigger via `workflow_dispatch` with `target_env` selection (`dev`).
+   - Concurrency control via `group: gcp-pipeline-${{ github.ref }}` with `cancel-in-progress: false` to ensure sequential delivery without abrupt aborts.
+   - Zero static credentials: uses GitHub OIDC token minting (`id-token: write` and `contents: read`).
+2. **Parallel Quality Gates**:
+   - `backend-test`: runs on `ubuntu-latest`, installs Python 3.11 and `uv` v5, syncs dev dependencies, and runs `uv run pytest tests` with `LLM_BACKEND=fake` and `APP_ENV=test`.
+   - `frontend-test`: runs concurrently in parallel on `ubuntu-latest`, sets up Node.js 22 with npm caching, installs dependencies via `npm ci`, and executes `npm test` (component tests and OpenAPI codegen checks).
+3. **Containerized Integration & Playwright E2E Suite (`integration-and-e2e`)**:
+   - Depends on `needs: [backend-test, frontend-test]`.
+   - Provisions Python 3.11, Node.js 22, and Playwright Chromium browser binaries (`npx playwright install --with-deps chromium`).
+   - Builds and starts production multi-stage container stack via `docker compose up -d --build --wait`.
+   - Polls `http://127.0.0.1:8000/api/healthz` with retry loop (up to 30 attempts, 2s interval) until healthy.
+   - Executes Docker Compose integration test scenarios via `python scripts/test_compose_integration.py --base-url http://127.0.0.1:8000`.
+   - Executes browser end-to-end journeys via `npm run test:e2e` with `BASE_URL=http://127.0.0.1:8000`.
+   - Guaranteed resource teardown via `docker compose down -v` under `if: always()`.
+   - Uploads Playwright traces and failure screenshots as GitHub workflow artifacts under `if: failure()`.
+4. **GCP OIDC Authentication, Artifact Registry & Cloud Run Deployment (`deploy-gcp`)**:
+   - Depends on `needs: [integration-and-e2e]`.
+   - Authenticates via Workload Identity Federation using `google-github-actions/auth@v2`.
+   - Builds and tags multi-stage container image `${TIMESTAMP}-${SHORT_SHA}` and `:latest`, pushing to `europe-west2-docker.pkg.dev/boxwood-scope-292916/handover/app`.
+   - Executes Cloud Run migration job `handover-migrate` with `--wait` to ensure database schema compatibility prior to traffic routing.
+   - Deploys container image to Cloud Run service `handover-dev` with Cloud SQL connection, Secret Manager bindings, and runtime service account.
+5. **Post-Deployment Health Validation (`validate-deploy`)**:
+   - Step `id: validate-deploy` resolves live public service URL via `gcloud run services describe`.
+   - Polls `${SERVICE_URL}/api/healthz` in a retry loop (12 attempts, 5s interval, 60s max).
+   - Validates HTTP 200 and parses JSON payload verifying `status == "ok"`.
+   - Publishes deployment metadata and direct links to `$GITHUB_STEP_SUMMARY`.
+   - Exits with failure code immediately if the service fails health verification.
+6. **Automated Verification Script (`scripts/verify_gcp_pipeline.py`)**:
+   - Standalone Python validator verifying YAML syntax, triggers, parallel job execution, sequential dependency chains, Docker Compose / Playwright steps, WIF OIDC setup, health check loop, and zero occurrences of non-target cloud provider references.
+
+
 
 
 
