@@ -1155,3 +1155,34 @@ All alerts maintain dimensional integrity via `sum by (service, environment, ver
 - **Infrastructure Scripts:** `infra/08-observability-stack.sh` and `infra/08-observability-stack.ps1` include `alert.rules.yml` in configuration synchronization and reload Prometheus.
 - **Live Deployment Status:** Verified active on `http://34.153.185.34:9090/api/v1/rules` with HTTP 200 `status: "success"` and health `"ok"`.
 - **Automated Verification:** `scripts/verify_alerts.py` validates rule syntax, PromQL expressions, threshold/duration constraints, label contracts, annotations, and remote Prometheus API loading.
+
+
+## 23. Autonomous On-Call Alert Polling and Headless Agent Dispatch (Issue #39)
+
+To autonomously investigate and remediate operational incidents, an alert polling daemon and headless coding agent dispatcher are implemented in `on-call-engineer/`:
+
+### 1. Architecture and Components
+- **`on-call-engineer/poll_alerts.py`**: CLI entrypoint supporting daemon execution (`--interval`, default 60s), single-run poll mode (`--once`), dry-run simulation mode (`--dry-run`), mock alert fixtures (`--alert-file`), custom Prometheus/observability alert API URL (`--alert-url`, default `http://34.153.185.34:9090/api/v1/alerts`), and configurable cooldown (`--cooldown`, default 900s / 15m).
+- **`on-call-engineer/poller.py` (`AlertPoller`)**: Queries the observability alert API endpoint (`/api/v1/alerts`), filters exclusively for `state: "firing"` alerts, tracks state transitions (`firing` ↔ `resolved`), deduplicates firing alerts across cycles, enforces cooldown windows, and safely locks against concurrent in-flight agent dispatches for the same alert.
+- **`on-call-engineer/dispatcher.py` (`AgentDispatcher`)**: Formats structured incident context and invokes the headless coding agent runner with the mandatory verbatim system prompt:
+  ```
+  You are the on-call engineer for this repository. An alert just fired.
+
+  Investigate the root cause. Read the code and reproduce the failure.
+  If you find a real bug, make the smallest correction, run the backend tests,
+  and commit the fix with a clear message.
+
+  If the alert is a false positive, explain why and do not change the code.
+  ```
+- **`on-call-engineer/models.py`**: Models for structured alert context (`AlertContext`, `AlertTrackedState`) and deterministic SHA-256 fingerprinting based on alert labels.
+- **`on-call-engineer/config.py`**: CLI arguments and environment variable fallbacks (`ALERT_API_URL`, `POLL_INTERVAL_SECONDS`, `ALERT_COOLDOWN_SECONDS`, `AGENT_CMD`, `ALERT_MOCK_FILE`).
+
+### 2. Operational Contracts and Error Handling
+- **Structured Telemetry Context**: Dispatched agents receive structured context via stdin and environment variables (`ON_CALL_ALERT_NAME`, `ON_CALL_ENVIRONMENT`, `ON_CALL_VERSION`, `ON_CALL_SEVERITY`, `ON_CALL_DASHBOARD_URL`, `ON_CALL_RUNBOOK_URL`, `ON_CALL_FIRING_TIMESTAMP`, `ON_CALL_FINGERPRINT`).
+- **Resilience**: Gracefully handles network timeouts, unreachable API endpoints, HTTP non-200 responses, and malformed payloads without process crashes, logging warnings and cleanly retrying on subsequent ticks.
+- **Deduplication**: Alerts are tracked by unique label fingerprints with a 15-minute cooldown window, preventing infinite dispatch loops while alerts remain active across poll cycles.
+
+### 3. Verification & Testing
+- **Unit & Integration Suite**: `on-call-engineer/tests/test_poller.py` (18 tests covering zero alerts, firing alerts, multiple simultaneous alerts, cooldown windows, unreachable API, malformed payloads, single-run, and dry-run modes).
+- **End-to-End Verification**: `scripts/verify_on_call_poller.py` validates all 7 check suites with exit code 0.
+
