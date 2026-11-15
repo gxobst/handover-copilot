@@ -981,3 +981,36 @@ Established a dedicated, manual promotion workflow (`.github/workflows/promote-p
 
 
 
+
+
+## 18. Two-Stage Build & Deploy Pipeline Architecture and Workflow De-duplication (Issues #32 & #33)
+
+To ensure build reproducibility, eliminate duplicate workflow execution, and uphold the "build once, deploy anywhere" principle, the CI/CD pipeline architecture has been refactored into distinct **Build** and **Deploy** stages with immutable container registry tagging:
+
+### 1. Two-Stage CI/CD Pipeline (`.github/workflows/gcp-pipeline.yml`)
+- **Stage Separation:**
+  1. `build-image`:
+     - Executes after automated test gates (`backend-test`, `frontend-test`, `integration-and-e2e`) succeed (`needs: [integration-and-e2e]`).
+     - Computes an immutable image tag strictly matching `YYYYMMDD-HHMMSS-shortsha` (e.g., `20261115-132158-889c129`).
+     - Authenticates via Workload Identity Federation (WIF) and pushes both the timestamped tag (`${TAG}`) and `:latest` to Google Artifact Registry (`europe-west2-docker.pkg.dev/boxwood-scope-292916/handover/app`).
+     - Exports `image_tag` and `image_uri` as job outputs.
+  2. `deploy-gcp`:
+     - Depends directly on the build job (`needs: [build-image]`).
+     - Pulls and deploys the container image `${{ needs.build-image.outputs.image_uri }}` directly without recompiling or rebuilding source code.
+     - Executes database schema upgrades against AlloyDB via `gcloud run jobs execute handover-migrate-dev --wait`.
+     - Excludes reserved `PORT=8000` from `--set-env-vars` (Cloud Run reserves `PORT` and manages it via `--port=8000`).
+     - Performs health smoke validation against `${SERVICE_URL}/api/healthz`.
+
+### 2. Workflow Trigger De-duplication
+- **Single Automated Pipeline on `main`:**
+  - Automated `on: push: branches: [main]` trigger was removed from `.github/workflows/deploy-dev.yml`.
+  - `.github/workflows/deploy-dev.yml` now triggers exclusively via manual `workflow_dispatch` (for ad-hoc bypass redeployments).
+  - `.github/workflows/gcp-pipeline.yml` is the sole automated CI/CD pipeline triggered on commits to `main`, eliminating duplicate parallel container builds, redundant compute expenses, and Cloud Run deployment race conditions.
+
+### 3. Pipeline Resilience & Test Environment Adaptability (Issue #33)
+- **Dynamic Health Check Assertions:**
+  - `backend/tests/test_health.py` dynamically evaluates `response.json()["environment"] == get_settings().environment`, allowing unit tests to run cleanly in CI (`APP_ENV=test`) as well as local environments (`APP_ENV=local`).
+- **Resilient Service Account Fallback:**
+  - `infra/06-cloud-run-migrate-job.sh` enforces safe variable expansion:
+    `RUNTIME_EMAIL="${RUNTIME_EMAIL:-${RUNTIME_SERVICE_ACCOUNT:-handover-runtime@${PROJECT_ID}.iam.gserviceaccount.com}}"`
+    preventing `unbound variable` errors under bash strict mode (`set -euo pipefail`).
