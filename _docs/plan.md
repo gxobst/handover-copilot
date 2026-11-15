@@ -931,6 +931,51 @@ Established a fully independent, isolated production environment infrastructure 
   5. Live data isolation: synthetic events created on dev do NOT appear in prod.
   6. Live auth & admin settings isolation: dev tokens are rejected on prod with 401, and admin setting mutations on dev do not contaminate prod.
 
+---
+
+## 17. Manual Production Promotion Workflow on GitHub Actions (#31)
+
+Established a dedicated, manual promotion workflow (`.github/workflows/promote-prod.yml`) that safely promotes a verified container image artifact from development (`handover-dev`) to production (`handover-prod`).
+
+### Architecture & Promotion Flow
+
+1. **Trigger & Environment Isolation**:
+   - Strictly manual trigger via `workflow_dispatch` with an optional `override_image_tag` input (defaults to empty to automatically resolve the currently running, verified image from `handover-dev`).
+   - GitHub environment: `production` with URL binding dynamically resolved from the post-deploy smoke check (`steps.smoke-check.outputs.service_url`).
+   - Concurrency group: `promote-prod` with `cancel-in-progress: false` to ensure atomic, non-overlapping production promotions.
+   - Permissions: `id-token: write` and `contents: read` for zero-static-key Workload Identity Federation (WIF).
+
+2. **Pre-flight Dev Verification**:
+   - Dynamically resolves dev service URL via `gcloud run services describe handover-dev`.
+   - Polls `GET ${DEV_URL}/api/healthz` (up to 12 retries, 5s interval) and validates HTTP 200 with payload `status: ok` before proceeding.
+   - Aborts immediately if dev is unhealthy to protect production from bad builds.
+
+3. **Artifact Resolution (Build Once, Promote Identical Artifact)**:
+   - Queries `gcloud run services describe handover-dev --format 'value(spec.template.spec.containers[0].image)'` to extract verified `IMAGE_URI` and `IMAGE_TAG`.
+   - Uses `override_image_tag` if explicitly provided by operator.
+   - Reuses the identical container image artifact without rebuilding.
+
+4. **Production Database Migration**:
+   - Executes `gcloud run jobs execute handover-migrate-prod --region=europe-west2 --project=boxwood-scope-292916 --wait`.
+   - Upgrades production AlloyDB schema to `head` prior to traffic routing.
+   - Immediately aborts if the migration fails, preventing live production traffic from hitting incompatible code/schema.
+
+5. **Cloud Run Production Deployment**:
+   - Deploys the identical artifact to Cloud Run service `handover-prod`.
+   - Sets isolated production secrets: `DATABASE_URL=DATABASE_URL_PROD:latest`, `ADMIN_TOKEN=ADMIN_TOKEN_PROD:latest`, `RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_PROD:latest`.
+   - Sets environment variables: `APP_ENV=prod`, `APP_VERSION=${IMAGE_TAG}`, `GCP_PROJECT=boxwood-scope-292916`, `GCP_LOCATION=global`, `LLM_BACKEND=vertex`, `ACTIVE_MODEL=google/gemini-3.5-flash-lite`, `FALLBACK_MODEL=google/gemini-3.1-flash-lite`, `LLM_TIMEOUT_S=20`.
+   - Direct VPC Egress: `--network=default --subnet=default --vpc-egress=private-ranges-only` with `--clear-cloudsql-instances`.
+   - Resource limits: `--min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120 --port=8000 --allow-unauthenticated`.
+
+6. **Production Smoke Check & Summary**:
+   - Polls `GET ${PROD_URL}/api/healthz` (12 attempts, 5s interval).
+   - Validates HTTP 200 and JSON response `status == "ok"` and `environment == "prod"`.
+   - Generates promotion summary in `$GITHUB_STEP_SUMMARY` with promoted tag, revision, and URLs.
+
+### Verification & Automated Testing
+- `scripts/verify_promote_workflow.py` validates YAML structure, triggers, OIDC credentials, preflight check, dev image resolution, migration job execution, production deployment flags, smoke check assertions, step summary, and zero non-GCP cloud provider references.
+
+
 
 
 

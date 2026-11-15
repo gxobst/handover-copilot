@@ -12,6 +12,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: promote-prod
+  cancel-in-progress: false
+
 env:
   PROJECT_ID: boxwood-scope-292916
   REGION: europe-west2
@@ -21,7 +25,6 @@ env:
   WIF_PROVIDER: projects/532827973195/locations/global/workloadIdentityPools/github-pool/providers/github-provider
   WIF_SERVICE_ACCOUNT: handover-deployer@boxwood-scope-292916.iam.gserviceaccount.com
   RUNTIME_SERVICE_ACCOUNT: handover-runtime@boxwood-scope-292916.iam.gserviceaccount.com
-  CLOUDSQL_INSTANCE: boxwood-scope-292916:europe-west2:handover-db
 
 jobs:
   promote-prod:
@@ -43,6 +46,36 @@ jobs:
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Pre-flight verify Dev service health
+        id: preflight-dev
+        run: |
+          DEV_URL="$(gcloud run services describe "${{ env.DEV_SERVICE }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format="value(status.url)")"
+          echo "dev_url=${DEV_URL}" >> "$GITHUB_OUTPUT"
+          echo "Checking dev service pre-flight health at ${DEV_URL}/api/healthz..."
+
+          HEALTHY=false
+          for i in {1..12}; do
+            HTTP_CODE="$(curl -s -o /tmp/dev_health.json -w "%{http_code}" "${DEV_URL}/api/healthz" || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              STATUS="$(python3 -c "import json; data=json.load(open('/tmp/dev_health.json')); print(data.get('status', ''))" 2>/dev/null || echo "")"
+              if [ "${STATUS}" = "ok" ]; then
+                HEALTHY=true
+                echo "Dev pre-flight health verified successfully:"
+                cat /tmp/dev_health.json
+                echo ""
+                break
+              fi
+            fi
+            echo "Waiting for dev healthz pre-flight (attempt $i, status: ${HTTP_CODE})..."
+            sleep 5
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "Dev pre-flight health verification failed with status: ${HTTP_CODE}"
+            cat /tmp/dev_health.json 2>/dev/null || true
+            exit 1
+          fi
+
       - name: Resolve verified image from Dev
         id: resolve-image
         run: |
@@ -61,9 +94,11 @@ jobs:
 
       - name: Run database migration job for Production
         env:
+          IMAGE_URI: ${{ steps.resolve-image.outputs.image_uri }}
+          IMAGE_TAG: ${{ steps.resolve-image.outputs.image_tag }}
           GCP_PROJECT: ${{ env.PROJECT_ID }}
           GCP_REGION: ${{ env.REGION }}
-          IMAGE_TAG: ${{ steps.resolve-image.outputs.image_tag }}
+          RUNTIME_EMAIL: ${{ env.RUNTIME_SERVICE_ACCOUNT }}
         run: |
           chmod +x ./infra/06-cloud-run-migrate-job.sh
           ./infra/06-cloud-run-migrate-job.sh prod
@@ -75,7 +110,7 @@ jobs:
       - name: Deploy identical artifact to Production
         env:
           IMAGE_URI: ${{ steps.resolve-image.outputs.image_uri }}
-          TAG: ${{ steps.resolve-image.outputs.image_tag }}
+          IMAGE_TAG: ${{ steps.resolve-image.outputs.image_tag }}
         run: |
           gcloud run deploy "${{ env.PROD_SERVICE }}" \
             --image="${IMAGE_URI}" \
@@ -94,7 +129,7 @@ jobs:
             --allow-unauthenticated \
             --clear-cloudsql-instances \
             --set-secrets=DATABASE_URL=DATABASE_URL_PROD:latest,ADMIN_TOKEN=ADMIN_TOKEN_PROD:latest,RELAY_WEBHOOK_TOKEN=RELAY_WEBHOOK_TOKEN_PROD:latest \
-            --set-env-vars="APP_ENV=prod,APP_VERSION=${TAG},GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
+            --set-env-vars="APP_ENV=prod,APP_VERSION=${IMAGE_TAG},GCP_PROJECT=${{ env.PROJECT_ID }},GCP_LOCATION=global,LLM_BACKEND=vertex,ACTIVE_MODEL=google/gemini-3.5-flash-lite,FALLBACK_MODEL=google/gemini-3.1-flash-lite,LLM_TIMEOUT_S=20"
 
       - name: Perform production smoke check
         id: smoke-check
@@ -107,10 +142,17 @@ jobs:
           for i in {1..12}; do
             HTTP_CODE="$(curl -s -o /tmp/health.json -w "%{http_code}" "${PROD_URL}/api/healthz" || echo "000")"
             if [ "${HTTP_CODE}" = "200" ]; then
-              HEALTHY=true
-              cat /tmp/health.json
-              echo ""
-              break
+              STATUS="$(python3 -c "import json; data=json.load(open('/tmp/health.json')); print(data.get('status', ''))" 2>/dev/null || echo "")"
+              ENV_NAME="$(python3 -c "import json; data=json.load(open('/tmp/health.json')); print(data.get('environment', ''))" 2>/dev/null || echo "")"
+              if [ "${STATUS}" = "ok" ] && [ "${ENV_NAME}" = "prod" ]; then
+                HEALTHY=true
+                echo "Production health check succeeded:"
+                cat /tmp/health.json
+                echo ""
+                break
+              else
+                echo "Response received (HTTP 200) but payload unexpected: status='${STATUS}', environment='${ENV_NAME}'"
+              fi
             fi
             echo "Waiting for production healthz (attempt $i, status: ${HTTP_CODE})..."
             sleep 5
@@ -118,6 +160,7 @@ jobs:
 
           if [ "${HEALTHY}" != "true" ]; then
             echo "Production health verification failed with status: ${HTTP_CODE}"
+            cat /tmp/health.json 2>/dev/null || true
             exit 1
           fi
 
