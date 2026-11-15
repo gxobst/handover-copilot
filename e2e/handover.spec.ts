@@ -331,8 +331,8 @@ test.describe.serial('Shift Handover Copilot End-to-End Suite', () => {
     const saveBtn = adminDialog.locator('button:has-text("Save Changes")');
     await expect(saveBtn).toBeDisabled();
 
-    // 5. Update setting with valid model name and save
-    await activeModelInput.fill('google/gemini-3.5-flash');
+    // 5. Update setting with valid allowed model name (google/gemini-3.1-flash-lite) and save
+    await activeModelInput.fill('google/gemini-3.1-flash-lite');
     await expect(saveBtn).toBeEnabled();
     await saveBtn.click();
 
