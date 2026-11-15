@@ -128,8 +128,8 @@ class ComposeIntegrationTestSuite:
         self.seeded_event_ids: List[str] = []
         self.report_v1_id: Optional[str] = None
         self.report_v2_id: Optional[str] = None
-        self.reconfigured_active_model: str = f"gemini-runtime-active-{self.unique_suffix}"
-        self.reconfigured_fallback_model: str = f"gemini-runtime-fallback-{self.unique_suffix}"
+        self.reconfigured_active_model: str = "google/gemini-3.1-flash-lite"
+        self.reconfigured_fallback_model: str = "google/gemini-3.5-flash-lite"
 
     def log(self, scenario: str, message: str) -> None:
         print(f"[{scenario}] {message}")
